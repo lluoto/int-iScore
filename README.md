@@ -1,4 +1,4 @@
-# Integrated Processing and Analysis Toolkit (iPA)
+# Integrated AI prediction interface Analysis Toolkit (iAI-PIA)
 
 <div align="center">
 
@@ -26,58 +26,43 @@
 
 ---
 
-**Developed by:** Angdi Li ([liad@shanghaitech.edu.cn](mailto:liad@shanghaitech.edu.cn))  
+**Developed by:** Yulin Luo ([luoyl2022@shanghaitech.edu.cn](mailto:luoyl2022@shanghaitech.edu.cn))  
 **Institution:** ShanghaiTech University
 
 
 
 ## Introduction
 
-iPA is an open-source Python platform for comprehensive analysis of cellular and subcellular imaging data. Our toolkit streamlines the workflow from raw image processing to advanced quantitative analysis, enabling researchers to extract biologically meaningful features from diverse microscopy modalities.
+iAI-PIA is an open-source platform for comprehensive analysis of the interface of AI-prediction protein complex models. Our toolkit streamlines the workflow from raw models data extraction to advanced quantitative analysis, enabling researchers to evaluate physic-chemial/statistic potential feature of protein-protein interaction(PPI).
 
-
-
-For detailed documentation, tutorials, and examples, please visit:  
-[Documentation on ReadTheDocs](https://ipa.readthedocs.io/en/latest/)
 
 ---
 
 #### Dependencies
 
 * numpy
-* scipy
+* json
+* Modeller
+* ast
 * pandas
-* matplotlib
-* scikit-image
-* tifffile
-* Pillow
-* opencv-python
-* mrcfile
-* n2v
-* plotly
-* seaborn
-* torch
-* torchvision
-* tensorflow
-* tqdm
-* h5py
-* scikit-learn
+* csv
+* mpi4py
+* math
+* freesasa
+* subprocess
+* DockQ
+* intercaat
+* biopython
+* chimera
+* CCP4
+* PDB2PQR
+* APBS
+* frustratometer2
+
 
 
 ---
 
-#### Example data
-* Example data are available from: [google doc link](https://drive.google.com/drive/folders/12bhaITv_xdNvs-pBwr6SSJviRlOkQ9cW?usp=drive_link)   
-* Download the `data.zip` file and extract it to the project root directory
-* After extraction, you should have the following structure:
-```
-iPA/
-├── data/          # <- Extracted data folder should be here
-├── ipa/
-├── examples/
-├── README.md
-└── ...
-```
 
 
 
