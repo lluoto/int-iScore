@@ -48,24 +48,19 @@ iAI-PIA is an open-source platform for comprehensive analysis of the interface o
 #### Dependencies
 
 * numpy
-* json
 * Modeller
-* ast
 * pandas
-* csv
 * mpi4py
-* math
-* freesasa
-* subprocess
-* DockQ
-* intercaat
-* biopython
-* chimera
-* CCP4(http://www.ccp4.ac.uk/)
-* PDB2PQR
-* APBS
-* frustratometer2
-* Alphafold3-score
+* freesasa (https://github.com/freesasa/freesasa-python)
+* DockQ (https://github.com/bjornwallner/DockQ)
+* intercaat (https://github.com/eved1018/Intercaat)
+* biopython (https://github.com/biopython/biopython)
+* UCSF Chimera (https://www.cgl.ucsf.edu/chimera/)
+* CCP4 (http://www.ccp4.ac.uk/)
+* PDB2PQR (https://github.com/Electrostatics/pdb2pqr)
+* APBS (https://github.com/Electrostatics/apbs)
+* frustratometer2 (http://frustratometer.qb.fcen.uba.ar/new_job)
+* Alphafold3-score (https://github.com/Mingchenchen/AF3Score)
 
 
 
