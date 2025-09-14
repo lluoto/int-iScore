@@ -1,17 +1,19 @@
-# Integrated AI prediction interface Analysis Toolkit (iAI-PIA)
+# Integrated AI Predictions Interface Analysis Scores Toolkit (int-iScore)
 
 <div align="center">
 
 ```
 ​**​*​**​*​**​*​**​*​**​*​**​*​**​*​**​**​**​**​
-*    ██╗ ██████╗   █████╗      ██╗ ██████╗       █████╗     *
-*    ██║ ██╔══██╗ ██╔══██╗     ██║ ██╔══██╗     ██╔══██╗
-*    ██║ ██████╔╝ ███████║     ██║ ██████╔╝     ███████║
-*    ██║ ██╔═══╝  ██╔══██║     ██║ ██╔═══╝      ██╔══██║
-*    ██║ ██║      ██║  ██║     ██║ ██║          ██║  ██║
-*    ╚═╝ ╚═╝      ╚═╝  ╚═╝     ╚═╝ ╚═╝          ╚═╝  ╚═╝ 
-*        
-*       
+*
+*
+*
+*    ██╗  █████╗    ██╗ ██████╗       █████╗     *
+*    ██║ ██╔══██╗ ██╔══██╗   ██║ ██╔══██╗     ██╔══██╗
+*    ██║ ██████╔╝ ███████║   ██║ ██████╔╝     ███████║
+*    ██║ ██╔═══╝  ██╔══██║   ██║ ██╔═══╝      ██╔══██║
+*    ██║ ██║      ██║  ██║   ██║ ██║          ██║  ██║
+*    ╚═╝ ╚═╝      ╚═╝  ╚═╝   ╚═╝ ╚═╝          ╚═╝  ╚═╝ 
+*           
 *        
 *        
 *       
@@ -63,6 +65,7 @@ iAI-PIA is an open-source platform for comprehensive analysis of the interface o
 * PDB2PQR
 * APBS
 * frustratometer2
+* Alphafold3-score
 
 
 
@@ -75,13 +78,30 @@ iAI-PIA is an open-source platform for comprehensive analysis of the interface o
 ### Overview
 
 
-![iPA Analysis Pipeline](./workflow_images/figure_1_v25.jpg)
 
-*Figure 1: iPA Analysis Pipeline Overview*
+*Table 1: iPA Analysis Pipeline Overview*
 
-
-
-
+=================================================================================================================================
+Feature   Range  Direction  Description                                            Feature_Type   Stability   Native_values (DB3)
+---------------------------------------------------------------------------------------------------------------------------------
+EC:       [-1,1] Positive   Electrostatic balance at the interface                 Interface      
+Sc:       [-1,1] Positive   Geometric / Steric fit at the interface                Interface       
+iPLDDT:   [0, 1] Positive   PLDDT score within interface 5 Å                       Interface        
+iPTM:     [0, 1] Positive   PTM score within interface 5 Å                         Interface       
+BSA:      [0, 1] Ambiguous  Size of the interface                                  Interface      
+Frustra:  [0, 1] Positive   Frustration of the interface                           Interface      
+CPscore:  [0, 1] Positive   inter-residue contacts preference                      Interface 
+SOAP:     [0, 1] Positive   statistic potential score of the interface             Interface 
+DOPE:     [0, 1] Positive   statistic potential score of the overall Structure      All_Atom       
+=================================================================================================================================
+   Extra Ramachandran check:  
+    
+	
+   DockQ Statistics on CAPRI data:  
+    0    <  DockQ <  0.23 - Incorrect
+    0.23 <= DockQ <  0.49 - Acceptable quality
+    0.49 <= DockQ <  0.80 - Medium quality
+            DockQ >= 0.80 - High quality
 #### Install from local source
 
 **Requirements:** Python 3.7-3.8
