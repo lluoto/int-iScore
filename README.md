@@ -4,12 +4,17 @@
 
 ```
 ​**​*​**​*​**​*​**​*​**​*​**​*​**​*​**​**​**​**​
-*    ██╗ ██████╗   █████╗     *
-*    ██║ ██╔══██╗ ██╔══██╗    *
-*    ██║ ██████╔╝ ███████║    *
-*    ██║ ██╔═══╝  ██╔══██║    *
-*    ██║ ██║      ██║  ██║    *
-*    ╚═╝ ╚═╝      ╚═╝  ╚═╝    *
+*    ██╗ ██████╗   █████╗      ██╗ ██████╗       █████╗     *
+*    ██║ ██╔══██╗ ██╔══██╗     ██║ ██╔══██╗     ██╔══██╗
+*    ██║ ██████╔╝ ███████║     ██║ ██████╔╝     ███████║
+*    ██║ ██╔═══╝  ██╔══██║     ██║ ██╔═══╝      ██╔══██║
+*    ██║ ██║      ██║  ██║     ██║ ██║          ██║  ██║
+*    ╚═╝ ╚═╝      ╚═╝  ╚═╝     ╚═╝ ╚═╝          ╚═╝  ╚═╝ 
+*        
+*       
+*        
+*        
+*       
 ​**​*​**​*​**​*​**​*​**​*​**​*​**​*​**​**​**​**​
 ```
 
@@ -83,8 +88,8 @@ iAI-PIA is an open-source platform for comprehensive analysis of the interface o
 
 ```bash
 # Create conda environment with Python 3.7 or 3.8
-conda create -n ipa_env python=3.7
-conda activate ipa_env
+conda create -n interface_score python=3.7
+conda activate interface_score
 
 # Install Git LFS (if not already installed)
 # On Ubuntu/Debian:
