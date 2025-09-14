@@ -7,7 +7,7 @@
 *
 *
 *
-*    ██╗  █████╗    ██╗ ██████╗       █████╗     *
+*    ██╗ █    ██╗ ██████╗       █████╗     *
 *    ██║ ██╔══██╗ ██╔══██╗   ██║ ██╔══██╗     ██╔══██╗
 *    ██║ ██████╔╝ ███████║   ██║ ██████╔╝     ███████║
 *    ██║ ██╔═══╝  ██╔══██║   ██║ ██╔═══╝      ██╔══██║
@@ -95,12 +95,13 @@ Frustration | [0, 1] | Frustration of the interface| Interface
 CPscore | [0, 1]| Inter-residue contacts preference | Interface 
 SOAP | [0, 1] | Statistic Potential score of the interface | Interface 
 DOPE | [0, 1] | Statistic Potential score of the overall Structure | All_Atom       
-DOPE | [0, 1] | overall evaluation on complex models | hybrid 
----
+int_score | [0, 1] | overall evaluation on complex models | hybrid 
+
    Extra Ramachandran check:  
-   The Ramachandran plot of steric angles (φ,ψ) relationship has been widely employed for protein structure determination, validation, model building, and for a great variety of applications and analyses since it was proposed in 1963 by late G.N. Ramachandran and coworkers ( Ramachandran et al., 1963; Ramakrishnan and Ramachandran, 1965; Ramachandran and Sasisekharan, 1968).\
-   We check it as complementary criteria for distinguishing improper models from prediction decoys.
-	
+   The Ramachandran plot of steric angles (φ,ψ) relationship has been widely employed for protein structure determination, validation, model building, and for a great variety of applications and analyses.\
+   We check it as complementary criteria for distinguishing improper models from prediction decoys.\
+
+   
     DockQ Statistics on CAPRI data:\
         0    <  DockQ <  0.23 - Incorrect\
         0.23 <= DockQ <  0.49 - Acceptable quality\
@@ -113,15 +114,16 @@ DOPE | [0, 1] | overall evaluation on complex models | hybrid
 
 ```bash
 # Create conda environment with Python 3.7 or 3.8
-conda create -n interface_score python=3.7
-conda activate interface_score
+conda create -n int_iScore python=3.7
+conda activate int_iScore
 
 # Clone the repository
-git clone https://github.com/SunLab-SH/iPA.git
-cd iPA
+git clone https://github.com/lluoto/int-iScore.git
+cd int-iScore
 
 # Install dependencies and the package
 pip install -r requirements.txt
+
 ```
 
 
