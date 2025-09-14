@@ -40,7 +40,7 @@
 
 ## Introduction
 
-iAI-PIA is an open-source platform for comprehensive analysis of the interface of AI-prediction protein complex models. Our toolkit streamlines the workflow from raw models data extraction to advanced quantitative analysis, enabling researchers to evaluate physic-chemial/statistic potential feature of protein-protein interaction(PPI).
+   iAI-PIA is an open-source platform for comprehensive analysis of the interface of AI-prediction protein complex models. Our toolkit streamlines the workflow from raw models data extraction to advanced quantitative analysis, enabling researchers to evaluate physic-chemial/statistic potential feature of protein-protein interaction(PPI).
 
 
 ---
@@ -102,7 +102,7 @@ int_score | [0, 1] | overall evaluation on complex models | hybrid
    We check it as complementary criteria for distinguishing improper models from prediction decoys.\
 
    
-    DockQ Statistics on CAPRI data:\
+   DockQ Statistics on CAPRI data:\
         0    <  DockQ <  0.23 - Incorrect\
         0.23 <= DockQ <  0.49 - Acceptable quality\
         0.49 <= DockQ <  0.80 - Medium quality\
