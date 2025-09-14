@@ -74,7 +74,7 @@ iAI-PIA is an open-source platform for comprehensive analysis of the interface o
 
 ---
 
-*Table 1: iPA Analysis Pipeline Overview*
+*Table 1: Physiochemistry properties/Empirical principles-based scoring functions selected for evaluation*
 
 =================================================================================================
 Feature   Range  Direction  Description                                            Feature_Type 
