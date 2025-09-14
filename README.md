@@ -48,7 +48,7 @@ iAI-PIA is an open-source platform for comprehensive analysis of the interface o
 #### Dependencies
 
 * numpy
-* Modeller
+* Modeller(https://salilab.org/modeller/registration.html)
 * pandas
 * mpi4py
 * freesasa (https://github.com/freesasa/freesasa-python)
@@ -76,9 +76,9 @@ iAI-PIA is an open-source platform for comprehensive analysis of the interface o
 
 *Table 1: iPA Analysis Pipeline Overview*
 
-=================================================================================================================================
-Feature   Range  Direction  Description                                            Feature_Type   Stability   Native_values (DB3)
----------------------------------------------------------------------------------------------------------------------------------
+=================================================================================================
+Feature   Range  Direction  Description                                            Feature_Type 
+-------------------------------------------------------------------------------------------------
 EC:       [-1,1] Positive   Electrostatic balance at the interface                 Interface      
 Sc:       [-1,1] Positive   Geometric / Steric fit at the interface                Interface       
 iPLDDT:   [0, 1] Positive   PLDDT score within interface 5 Å                       Interface        
@@ -88,7 +88,7 @@ Frustra:  [0, 1] Positive   Frustration of the interface                        
 CPscore:  [0, 1] Positive   inter-residue contacts preference                      Interface 
 SOAP:     [0, 1] Positive   statistic potential score of the interface             Interface 
 DOPE:     [0, 1] Positive   statistic potential score of the overall Structure      All_Atom       
-=================================================================================================================================
+=================================================================================================
    Extra Ramachandran check:  
     
 	
@@ -106,39 +106,14 @@ DOPE:     [0, 1] Positive   statistic potential score of the overall Structure  
 conda create -n interface_score python=3.7
 conda activate interface_score
 
-# Install Git LFS (if not already installed)
-# On Ubuntu/Debian:
-sudo apt install git-lfs
-# On macOS:
-brew install git-lfs
-# On Windows: download from https://git-lfs.github.io/
-
-# Initialize Git LFS
-git lfs install
-
 # Clone the repository
 git clone https://github.com/SunLab-SH/iPA.git
 cd iPA
 
-# Pull large files (including .pth model files)
-git lfs pull
-
 # Install dependencies and the package
 pip install -r requirements.txt
-pip install -e .
 ```
 
 
 
-<!-- ## Citation
 
-If you use iPA in your research, please cite:
-
-```bibtex
-@software{iPA2024,
-  title={Integrated Processing and Analysis Toolkit for Multi-Scale Cellular Imaging},
-  author={Li, Angdi and others},
-  year={2024},
-  url={https://github.com/SunLab-SH/iPA}
-}
-``` -->
