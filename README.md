@@ -52,7 +52,6 @@ iAI-PIA is an open-source platform for comprehensive analysis of the interface o
 * pandas
 * mpi4py
 * freesasa (https://github.com/freesasa/freesasa-python)
-* DockQ (https://github.com/bjornwallner/DockQ)
 * intercaat (https://github.com/eved1018/Intercaat)
 * biopython (https://github.com/biopython/biopython)
 * UCSF Chimera (https://www.cgl.ucsf.edu/chimera/)
@@ -61,6 +60,8 @@ iAI-PIA is an open-source platform for comprehensive analysis of the interface o
 * APBS (https://github.com/Electrostatics/apbs)
 * frustratometer2 (http://frustratometer.qb.fcen.uba.ar/new_job)
 * Alphafold3-score (https://github.com/Mingchenchen/AF3Score)
+
+* DockQ (https://github.com/bjornwallner/DockQ) for integrated score evaluating.
 
 
 
@@ -103,6 +104,7 @@ SOAP:     [0, 1] Positive   statistic potential score of the interface          
 DOPE:     [0, 1] Positive   statistic potential score of the overall Structure      All_Atom       
 =================================================================================================
    Extra Ramachandran check:  
+   The Ramachandran plot of torsion angles (φ,ψ) has been widely employed for protein structure determination, validation, model building, and for a great variety of applications and analyses, since it was proposed in 1963 by late G.N. Ramachandran and coworkers ( Ramachandran et al., 1963; Ramakrishnan and Ramachandran, 1965; Ramachandran and Sasisekharan, 1968). We check it as complementary criteria for distinguishing improper models from prediction decoys.
     
 	
    DockQ Statistics on CAPRI data:  
