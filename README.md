@@ -82,8 +82,6 @@ iAI-PIA is an open-source platform for comprehensive analysis of the interface o
 
 ### Overview
 
----
-
 *Table 1: Physiochemistry properties/Empirical principles-based scoring functions selected for evaluation*
 
 | Feature | Range | Description | Feature_Type | 
@@ -94,19 +92,20 @@ iPLDDT | [0, 1] | PLDDT score within interface 5 Å | Interface
 iPTM | [0, 1] | PTM score within interface 5 Å | Interface       
 BSA | [0, 1] | Size of the interface|Interface      
 Frustration | [0, 1] | Frustration of the interface| Interface      
-CPscore | [0, 1]| inter-residue contacts preference | Interface 
-SOAP | [0, 1] | statistic potential score of the interface | Interface 
-DOPE | [0, 1] | statistic potential score of the overall Structure | All_Atom       
-
+CPscore | [0, 1]| Inter-residue contacts preference | Interface 
+SOAP | [0, 1] | Statistic Potential score of the interface | Interface 
+DOPE | [0, 1] | Statistic Potential score of the overall Structure | All_Atom       
+DOPE | [0, 1] | overall evaluation on complex models | hybrid 
+---
    Extra Ramachandran check:  
-   The Ramachandran plot of steric angles (φ,ψ) relationship has been widely employed for protein structure determination, validation, model building, and for a great variety of applications and analyses since it was proposed in 1963 by late G.N. Ramachandran and coworkers ( Ramachandran et al., 1963; Ramakrishnan and Ramachandran, 1965; Ramachandran and Sasisekharan, 1968). We check it as complementary criteria for distinguishing improper models from prediction decoys.
-    
+   The Ramachandran plot of steric angles (φ,ψ) relationship has been widely employed for protein structure determination, validation, model building, and for a great variety of applications and analyses since it was proposed in 1963 by late G.N. Ramachandran and coworkers ( Ramachandran et al., 1963; Ramakrishnan and Ramachandran, 1965; Ramachandran and Sasisekharan, 1968).\
+   We check it as complementary criteria for distinguishing improper models from prediction decoys.
 	
-   DockQ Statistics on CAPRI data:  
-    0    <  DockQ <  0.23 - Incorrect
-    0.23 <= DockQ <  0.49 - Acceptable quality
-    0.49 <= DockQ <  0.80 - Medium quality
-            DockQ >= 0.80 - High quality
+    DockQ Statistics on CAPRI data:\
+        0    <  DockQ <  0.23 - Incorrect\
+        0.23 <= DockQ <  0.49 - Acceptable quality\
+        0.49 <= DockQ <  0.80 - Medium quality\
+                DockQ >= 0.80 - High quality\
 ---
 #### Install from local source
 
