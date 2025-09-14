@@ -72,7 +72,7 @@ iAI-PIA is an open-source platform for comprehensive analysis of the interface o
 
 ### Overview
 
-
+---
 
 *Table 1: iPA Analysis Pipeline Overview*
 
@@ -97,6 +97,7 @@ DOPE:     [0, 1] Positive   statistic potential score of the overall Structure  
     0.23 <= DockQ <  0.49 - Acceptable quality
     0.49 <= DockQ <  0.80 - Medium quality
             DockQ >= 0.80 - High quality
+---
 #### Install from local source
 
 **Requirements:** Python 3.7-3.8
