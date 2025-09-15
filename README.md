@@ -33,25 +33,25 @@
 
 ## Introduction
 
-   iAI-PIA is an open-source platform for comprehensive analysis of the interface of AI-prediction protein complex models. Our toolkit streamlines the workflow from raw models data extraction to advanced quantitative analysis, enabling researchers to evaluate physic-chemial/statistic potential feature of protein-protein interaction(PPI).
+   iAI-PIA is an open-source platform for comprehensive analysis of the interface of AI-prediction protein complex models. Our toolkit streamlines the workflow from raw models data extraction to advanced quantitative analysis, enabling researchers to evaluate physic-chemial/statistic potential feature of protein-protein interactions(PPI).
 
 
 ---
 
 #### Dependencies
 
-* numpy
+* Numpy
 * Modeller(https://salilab.org/modeller/registration.html)
-* pandas
-* mpi4py
-* freesasa (https://github.com/freesasa/freesasa-python)
-* intercaat (https://github.com/eved1018/Intercaat)
-* biopython (https://github.com/biopython/biopython)
+* Pandas
+* MPI4py
+* Freesasa (https://github.com/freesasa/freesasa-python)
+* Intercaat (https://github.com/eved1018/Intercaat)
+* Biopython (https://github.com/biopython/biopython)
 * UCSF Chimera (https://www.cgl.ucsf.edu/chimera/)
 * CCP4 (http://www.ccp4.ac.uk/)
 * PDB2PQR (https://github.com/Electrostatics/pdb2pqr)
 * APBS (https://github.com/Electrostatics/apbs)
-* frustratometer2 (http://frustratometer.qb.fcen.uba.ar/new_job)
+* Frustratometer2 (http://frustratometer.qb.fcen.uba.ar/new_job)
 * Alphafold3-score (https://github.com/Mingchenchen/AF3Score)
 
 * DockQ (https://github.com/bjornwallner/DockQ) for integrated score evaluating.
@@ -63,7 +63,7 @@
 * UCSF Chimera (https://www.cgl.ucsf.edu/chimera/)
 * CCP4 (http://www.ccp4.ac.uk/)
 * APBS (https://github.com/Electrostatics/apbs)
-* frustratometer2 (http://frustratometer.qb.fcen.uba.ar/new_job)
+* Frustratometer2 (http://frustratometer.qb.fcen.uba.ar/new_job)
 
 
 
@@ -92,7 +92,7 @@ int_score | [0, 1] | overall evaluation on complex models | hybrid
 
    Extra Ramachandran check:  
    The Ramachandran plot of steric angles (φ,ψ) relationship has been widely employed for protein structure determination, validation, model building, and for a great variety of applications and analyses.\
-   We check it as complementary criteria for distinguishing improper models from prediction decoys.\
+   We check it as complementary criteria for distinguishing improper models from prediction decoys.
 
    
    DockQ Statistics on CAPRI data:\
