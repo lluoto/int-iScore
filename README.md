@@ -47,11 +47,7 @@
 * Freesasa (https://github.com/freesasa/freesasa-python)
 * Intercaat (https://github.com/eved1018/Intercaat)
 * Biopython (https://github.com/biopython/biopython)
-* UCSF Chimera (https://www.cgl.ucsf.edu/chimera/)
-* CCP4 (http://www.ccp4.ac.uk/)
 * PDB2PQR (https://github.com/Electrostatics/pdb2pqr)
-* APBS (https://github.com/Electrostatics/apbs)
-* Frustratometer2 (http://frustratometer.qb.fcen.uba.ar/new_job)
 * Alphafold3-score (https://github.com/Mingchenchen/AF3Score)
 
 * DockQ (https://github.com/bjornwallner/DockQ) for integrated score evaluating.
@@ -79,7 +75,7 @@
 
 | Feature | Range | Description | Feature_Type | 
 | ------- | ----- | ----------- | ------------ |
-EC | [-1,1] | Electrostatic balance at the interface | Interface      
+Ec | [-1,1] | Electrostatic balance at the interface | Interface      
 Sc | [-1,1] | Geometric / Steric fit at the interface | Interface       
 iPLDDT | [0, 1] | PLDDT score within interface 5 Å | Interface        
 iPTM | [0, 1] | PTM score within interface 5 Å | Interface       
