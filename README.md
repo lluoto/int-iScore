@@ -99,7 +99,7 @@ int_score | [0, 1] | overall evaluation on complex models | hybrid
         0    <  DockQ <  0.23 - Incorrect\
         0.23 <= DockQ <  0.49 - Acceptable quality\
         0.49 <= DockQ <  0.80 - Medium quality\
-                DockQ >= 0.80 - High quality\
+                DockQ >= 0.80 - High quality
 ---
 #### Install from local source
 
