@@ -33,7 +33,7 @@
 
 ## Introduction
 
-   iAI-PIA is an open-source platform for comprehensive analysis of the interface of AI-prediction protein complex models. Our toolkit streamlines the workflow from raw models data extraction to advanced quantitative analysis, enabling researchers to evaluate physic-chemial/statistic potential feature of protein-protein interactions(PPI).
+   int-iScore is an open-source platform for comprehensive analysis of the interface of AI-prediction protein complex models. Our toolkit streamlines the workflow from raw models data extraction to advanced quantitative analysis, enabling researchers to evaluate physic-chemial/statistic potential feature of protein-protein interactions(PPI).
 
 
 ---
@@ -49,6 +49,7 @@
 * Biopython (https://github.com/biopython/biopython)
 * PDB2PQR (https://github.com/Electrostatics/pdb2pqr)
 * Alphafold3-score (https://github.com/Mingchenchen/AF3Score)
+* CPscore (https://github.com/wallnerlab/ProQDock)
 
 * DockQ (https://github.com/bjornwallner/DockQ) for integrated score evaluating.
 
@@ -99,11 +100,11 @@ int_score | [0, 1] | overall evaluation on complex models | hybrid
 ---
 #### Install from local source
 
-**Requirements:** Python 3.7-3.8
+**Requirements:** Python 3.10+
 
 ```bash
-# Create conda environment with Python 3.7 or 3.8
-conda create -n int_iScore python=3.7
+# Create conda environment with Python 3.10+
+conda create -n int_iScore python=3.10
 conda activate int_iScore
 
 # Clone the repository
