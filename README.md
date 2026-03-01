@@ -114,6 +114,9 @@ cd int-iScore
 # Install dependencies and the package
 pip install -r requirements.txt
 
+# unzip CPScore and frustrate calculation module 
+tar -jxvf cp_svm.tar.bz2
+tar -jxvf frustratometer.tar.bz2
 ```
 
 
