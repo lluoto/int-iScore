@@ -113,11 +113,11 @@ cd int-iScore
 conda create -n int_iScore -f env.yml
 conda activate int_iScore
 
-# unzip CPScore and frustrate calculation module 
+# Unzip CPScore and frustrate calculation module 
 tar -jxvf cp_svm.tar.bz2
 tar -jxvf frustratometer.tar.bz2
 ```
-
+# Modify intercaat_config.ini for utilize the qhull for better intercaat calculate performance
 
 
 
