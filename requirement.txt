@@ -132,6 +132,7 @@ packaging=25.0=py310h06a4308_1
 pandas=2.3.3=py310h23c847b_1
 pcre2=10.46=hf426167_0
 pdb2pqr=3.6.2=pypi_0
+perl=1.0.0=pypi_0
 pillow=12.1.0=py310hd9fd23a_0
 pip=26.0.1=pyhc872135_0
 pixman=0.46.4=h7934f7d_0
