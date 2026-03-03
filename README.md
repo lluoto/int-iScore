@@ -103,16 +103,15 @@ int_score | [0, 1] | overall evaluation on complex models | hybrid
 **Requirements:** Python 3.10+
 
 ```bash
-# Create conda environment with Python 3.10+
-conda create -n int_iScore python=3.10
-conda activate int_iScore
+
 
 # Clone the repository
 git clone https://github.com/lluoto/int-iScore.git
 cd int-iScore
 
-# Install dependencies and the package
-pip install -r requirements.txt
+# Create conda environment with Python 3.10+
+conda create -n int_iScore -f env.yml
+conda activate int_iScore
 
 # unzip CPScore and frustrate calculation module 
 tar -jxvf cp_svm.tar.bz2
