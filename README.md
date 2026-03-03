@@ -112,6 +112,8 @@ cd int-iScore
 # Create conda environment with Python 3.10+
 conda create -n int_iScore -f env.yml
 conda activate int_iScore
+# mpi4py should extra process
+conda install mpi4py -y
 
 # Unzip CPScore and frustrate calculation module 
 tar -jxvf cp_svm.tar.bz2
