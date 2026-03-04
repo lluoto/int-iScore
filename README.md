@@ -44,19 +44,18 @@
 * Modeller(https://salilab.org/modeller/registration.html)
 * Pandas
 * MPI4py
-* Freesasa (https://github.com/freesasa/freesasa-python)
 * Intercaat (https://github.com/eved1018/Intercaat)
 * Biopython (https://github.com/biopython/biopython)
 * PDB2PQR (https://github.com/Electrostatics/pdb2pqr)
 * Alphafold3-score (https://github.com/Mingchenchen/AF3Score)
 * CPscore (https://github.com/wallnerlab/ProQDock)
-
+* FindContacts(https://github.com/TMiclot/FindContacts)
 * DockQ (https://github.com/bjornwallner/DockQ) for integrated score evaluating.
 
 
 
 #### Softwares
-
+* VMD (https://www.ks.uiuc.edu/Research/vmd/)
 * UCSF Chimera (https://www.cgl.ucsf.edu/chimera/)
 * CCP4 (http://www.ccp4.ac.uk/)
 * APBS (https://github.com/Electrostatics/apbs)
@@ -119,6 +118,7 @@ conda install mpi4py -y
 tar -jxvf cp_svm.tar.bz2
 tar -jxvf frustratometer.tar.bz2
 ```
+# if omit license modification step during the modeller install, please find /path/to/anaconda/envs/int_iScore/lib/modeller/modlib/config.py
 # Modify intercaat_config.ini for utilize the qhull for better intercaat calculate performance
 # Modify RunFrustratometer.pl inside the frustratometer/ for frustrate computation
 
