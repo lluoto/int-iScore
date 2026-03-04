@@ -120,6 +120,7 @@ tar -jxvf cp_svm.tar.bz2
 tar -jxvf frustratometer.tar.bz2
 ```
 # Modify intercaat_config.ini for utilize the qhull for better intercaat calculate performance
+# Modify RunFrustratometer.pl inside the frustratometer/ for frustrate computation
 
 
 
