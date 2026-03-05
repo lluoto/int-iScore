@@ -47,7 +47,6 @@
 * Intercaat (https://github.com/eved1018/Intercaat)
 * Biopython (https://github.com/biopython/biopython)
 * PDB2PQR (https://github.com/Electrostatics/pdb2pqr)
-* Alphafold3-score (https://github.com/Mingchenchen/AF3Score)
 * CPscore (https://github.com/wallnerlab/ProQDock)
 * FindContacts(https://github.com/TMiclot/FindContacts)
 * DockQ (https://github.com/bjornwallner/DockQ) for integrated score evaluating.
