@@ -1,4 +1,4 @@
-# Integrated AI Predictions Interface Analysis Scores Toolkit (int-iScore)
+# Integrated computational Predictions Interface Analysis Scores Toolkit (int-iScore)
 
 <div align="center">
 
