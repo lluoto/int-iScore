@@ -321,6 +321,19 @@ These wrappers are intended to preserve access to historical repo-root workflows
 They are **not** yet fully package-native modes and should be treated as source-tree-dependent
 compatibility entrypoints rather than stable release-grade APIs.
 
+Example execution commands:
+
+```bash
+# Legacy frustratometer batch workflow
+int-iscore-frustration-legacy
+
+# Legacy benchmark / input-data generation workflow
+int-iscore-input-data-legacy
+```
+
+These commands are expected to be run from a checked-out source tree that still contains
+the historical supporting files and templates used by the original scripts.
+
 ## DockQ Quality Thresholds
 
 | DockQ Range | Quality |

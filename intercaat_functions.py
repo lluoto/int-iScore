@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+import os
 import numpy as np
 from configparser import ConfigParser
 
@@ -51,7 +52,8 @@ def run_voro(points):
 	return: (list of list of ints) each list contains the indices of neighboring atoms to the atom at that particular index  
 	"""
 	config = ConfigParser()
-	config.read('intercaat_config.ini')
+	script_dir = os.path.dirname(os.path.abspath(__file__))
+	config.read(os.path.join(script_dir, 'intercaat_config.ini'))
 	python_version = config.get('qvoronoi_path', 'run_python_version')
 	if python_version == 'no':
 		return voroC(points)
@@ -85,7 +87,8 @@ def voroC(points):
 
 	newFile.close()
 	config = ConfigParser()
-	config.read('intercaat_config.ini')
+	script_dir = os.path.dirname(os.path.abspath(__file__))
+	config.read(os.path.join(script_dir, 'intercaat_config.ini'))
 	
 	qhullPath = config.get('qvoronoi_path', 'qvoronoi_bin')
 	qvoronoi  = config.get('qvoronoi_path', 'executable_name')
@@ -135,7 +138,10 @@ def voroPython(points):
 	arg1:   (numpy list of lists of strings) each list contains the coordinate of one atom
 	return: (list of list of ints) each list contains the indices of neighboring atoms to the atom at that particular index  
 	'''
-	v = Voronoi(np.array(points))
+	points_arr = np.array(points)
+	if len(points_arr) < 4:
+		return [[] for _ in range(len(points_arr))]
+	v = Voronoi(points_arr)
 	contacts = v.ridge_points
 
 	count1 = 0
@@ -166,6 +172,10 @@ def parse(pdb_filename, include, dir):
 	return: (list of list of strings) PDB lines containing atoms and hetatms. 
 									  Exludes hydrogen and water atoms. Only includes atoms with highest occupancy
 	'''
+	if pdb_filename.startswith('/'):
+		pdb_filename = os.path.basename(pdb_filename)
+	if not dir.endswith('/'):
+		dir = dir + '/'
 	file = dir + pdb_filename
 	fh = open(file)
 	atomTemp = []
