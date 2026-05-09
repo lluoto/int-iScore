@@ -24,9 +24,9 @@ run_*.py
 # Shell scripts at root (except essential ones)
 mpi_*.sh
 
-# Test artifacts
-*.log
-*.csv
+# Root-level test artifacts
+/*.log
+/*.csv
 
 # IDE
 .vscode/
@@ -35,3 +35,4 @@ mpi_*.sh
 # OS
 .DS_Store
 Thumbs.db
+/sc_hts
