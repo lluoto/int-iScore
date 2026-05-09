@@ -1,1 +1,37 @@
 test.pqr.dx
+
+
+# Test / temp directories
+int_iscore_temp/
+src/int_iscore_temp/
+output_test/
+build/
+
+# Frustratometer2 intermediate output directories
+frustratometer2-master/*.done/
+
+# Backup files
+*.bak
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Test scripts at root
+test_*.py
+run_*.py
+
+# Shell scripts at root (except essential ones)
+mpi_*.sh
+
+# Test artifacts
+*.log
+*.csv
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
