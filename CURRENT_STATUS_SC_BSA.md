@@ -132,13 +132,51 @@ Reason:
 
 ### Experimental backend note
 
-- A pybind11 backend scaffold was integrated and builds successfully:
-  - `src/int_iscore/utils/sc_backend.cpp`
-- It is gated behind `INT_ISCORE_USE_SC_BACKEND=1` and is currently **disabled by default** in practice via Python fallback.
-- Multiple backend iterations were tried. Build/integration is solved, but current backend geometry/scoring is still scientifically incorrect on CCP4 reference cases.
-- A principled spatial-hash nearest-neighbor search was integrated into the experimental backend to replace brute-force nearest-point scoring.
-- This improves backend search structure and scalability, but does **not** yet solve the main scientific mismatch; surface generation and buried/trim classification remain the dominant error sources.
-- The backend therefore remains a handoff target for further work, not an active production path.
+**C++ Connolly backend** (`sc_backend.cpp`):
+- Gated behind `INT_ISCORE_USE_SC_BACKEND=1`.
+- Convex + toroidal + concave surface generation.
+- KD-tree nearest-neighbor scoring with `|n_dot| * exp(-w*d²)`.
+- Current best values (with probe=1.7, dot_density=15, trim=1.5, weight=0.5):
+  - `5HT2C A-B: 0.082`  vs CCP4 `0.448`
+  - `6A6I ref: 0.049`  vs CCP4 `0.616`
+- Surface and trim counts now match CCP4 closely.
+- Remaining gap: SC values still ~5x too low. Likely cause: normal-dot magnitude or distance scale calibration.
+
+**Clean Python implementation** (`sc_calculator_new.py` → deployed as `sc_calculator.py`):
+- Replaced old voxel-SES code with physics-driven Connolly path.
+- Convex surface generation with occlusion testing.
+- Buried classification by probe-center overlap.
+- Peripheral-band trim.
+- Scoring: median of `|normal_dot| * exp(-w * d²)`.
+- Default path values:
+  - `5HT2C A-B: 0.027`  (16x below CCP4)
+  - `6A6I ref: 0.014`  (44x below CCP4)
+
+**Key bugs found and fixed today:**
+1. Trim logic was inverted (kept edge points instead of removing them) → fixed
+2. Concave normals pointed inward (toward protein) instead of outward → fixed
+3. Surface sampling density was too low → increased 4x
+
+**Remaining gap analysis:**
+After fixing surface counts, trim counts, normal orientation, and trim logic, SC values are still ~5x low in the C++ backend. This suggests the scoring calibration (normal-dot magnitude vs CCP4 convention and/or effective distance scale) is the remaining tuning target, not surface geometry or architecture.
+
+**Standalone C++ tool** (`int_iscore_temp/sc_standalone.cpp`):
+- Complete self-contained CCP4-style SC calculator
+- Requires `nanoflann` header (not yet installed on server)
+- Implements all four CCP4 steps with correct inward-normals convention
+- Inward normals: point toward atom centre; complementarity gives positive n_A·n_B
+- Scoring: S = (n_A·n_B) * exp(-w·d²), median-based, neighbour on FULL surface
+- Compile: `g++ -std=c++17 -O3 -fopenmp -o sc_standalone sc_standalone.cpp`
+- Usage: `./sc_standalone <pdb> <chain1> <chain2>`
+
+**Next model should:**
+1. Install nanoflann: `pip install nanoflann` or `apt install libnanoflann-dev`
+2. Compile and test standalone tool on 5HT2C and 6A6I
+3. Compare results against CCP4 reference values in this log
+4. If standalone tool matches CCP4, fold its surfaced/trim/scoring logic into `sc_backend.cpp`
+5. If still gapped, calibrate normal-dot scaling or distance term using the standalone tool's diagnostic output
+6. Add toroidal/concave points to Python path for parity
+7. Then retest on full 6A6I and 5HT2C datasets
 
 ### Proposed continuation directory for another model
 
@@ -204,3 +242,33 @@ Most relevant next-step files:
 - **BSA**: active path is already on `freesasa`; legacy VMD path has been removed from the old scripts.
 - **SC**: improved significantly from the original Python attempt, but still not a full CCP4-equivalent replacement.
 - **Best next move**: reimplement the SC geometric core in C++ rather than continue stacking heuristics on the Python SES approximation.
+
+
+---
+
+## UPDATE 2026-05-09 — SC Optimization Complete
+
+### Changes
+- **sc_calculator.py**: Integrated SCASA connolly.py (CCP4 mds, GPL-3.0) for full
+  Connolly surface generation. Fixed scoring: abs(dot) → (-dot). NN target: full → trimmed.
+- **sc_backend.cpp**: Fixed scoring (abs→negate), concave surface point position, NN target.
+- **connolly.py**: Added from SCASA (CCP4 mds Fortran-to-Python translation).
+- **SCASA_LICENSE**: GPL-3.0 license file.
+
+### Verification
+| PDB | Chains | SC (fixed) | SC (CCP4) | Delta |
+|-----|--------|-----------|-----------|-------|
+| 6A6I | A-B | 0.607 | 0.616 | -1.5% |
+| 5HT2C | A-B | 0.453 | 0.448 | +1.1% |
+
+Both within SCASA reference tolerance (delta <0.02).
+
+### Resolution
+The 5-44x SC gap was caused by:
+1. **Surface type**: SAS (solvent-accessible) instead of Connolly molecular surface.
+   SAS points are ~5.5x farther apart (2.36A vs 0.43A median distance).
+2. **Scoring**: abs(dot) loses sign information; CCP4 uses negate convention.
+3. **NN target**: Full surface search includes non-buried points with irrelevant normals.
+
+All three issues resolved. Production Python path now matches CCP4 within 2%.
+C++ backend (partially fixed, SC=0.053) requires toroidal function rewrite for parity.
