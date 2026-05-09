@@ -23,7 +23,11 @@ chomp $jobsDir;
 my $seqdist=12;
 
 #Change this path to the folder in which this script is located
-my $scriptsDir="/mnt/sdb2/lluoto/int-iScore/frustratometer2-master/Scripts";
+use Cwd "abs_path";
+use File::Basename "dirname";
+my $scriptPath = abs_path($0);
+my $scriptDir2 = dirname($scriptPath);
+my $scriptsDir = "$scriptDir2/Scripts";
 my ($pdbfile, $parentdir, $extension) = fileparse($jobID, qr/\.[^.]*$/);
 ########################################################################
 #------------End Input parameters---------------########################

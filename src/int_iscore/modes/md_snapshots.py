@@ -17,6 +17,7 @@ from ..core.metrics import (
     convert_and_soap,
     dp2_and_cpscore,
     procheck_analysis,
+    compute_frustration_score,
 )
 from ..core.parser import parse_md_args, parse_chain_specification
 from ..utils import calculate_sc
@@ -206,7 +207,7 @@ def process_md_snapshot(file_path, chain_info, args, rank=0):
         os.path.basename(file_path),
         dope,
         soap,
-        0,  # frustration_score
+        compute_frustration_score(file_path, partner_chains, mode="configurational", electrostatics_k=0),  # frustration_score
         cp_score,
         bsa,
         interface_residues,

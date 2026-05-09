@@ -419,3 +419,137 @@ def convert_and_soap(model, reference):
         ref_chains = [c.name for c in ref_mdl.chains]
 
     return score, model_chains, ref_chains, new_path, dope
+
+
+def compute_frustration_score(
+    pdb_path: str,
+    partner_chains: list = None,
+    mode: str = "configurational",
+    electrostatics_k: int = 0,
+    scripts_dir: str = None,
+) -> float:
+    """Compute configurational frustration score using frustratometer2.
+
+    Wraps the Perl-based RunFrustratometer.pl (AWSEM/LAMMPS pipeline) to
+    calculate residue-level frustration indices for a PDB structure, then
+    sums the indices for inter-chain residue pairs (interface frustration).
+
+    Args:
+        pdb_path: Path to input PDB file.
+        partner_chains: List of chain IDs that form the interaction partner.
+                        If None, sums all inter-chain frustration indices.
+        mode: Frustratometer mode (default: "configurational").
+        electrostatics_k: Electrostatics constant (0 = disabled).
+        scripts_dir: Path to frustratometer2-master/Scripts directory.
+                     Auto-detected from int-iScore repo root if None.
+
+    Returns:
+        Summed frustration score (float), or 0.0 on failure.
+
+    Integration (2026-05-09):
+        Replaces the legacy hardcoded frustration_score=0 placeholder in
+        md_snapshots.py. Connects the frustratometer2-master Perl pipeline
+        into the active int-iScore scoring workflow.
+    """
+    import os
+    import shutil
+    import subprocess
+    import tempfile
+    from pathlib import Path
+
+    if not os.path.exists(pdb_path):
+        return 0.0
+
+    if scripts_dir is None:
+        # Auto-detect: assumes frustratometer2-master is in repo root
+        repo_root = Path(__file__).resolve().parents[3]
+        scripts_dir = os.path.join(repo_root, "frustratometer2-master", "Scripts")
+
+    if not os.path.exists(scripts_dir):
+        print(f"Frustratometer scripts not found: {scripts_dir}")
+        return 0.0
+
+    run_pl = os.path.join(scripts_dir, "..", "RunFrustratometer.pl")
+    if not os.path.exists(run_pl):
+        print(f"RunFrustratometer.pl not found: {run_pl}")
+        return 0.0
+
+    pdb_name = os.path.basename(pdb_path)
+    base_name = os.path.splitext(pdb_name)[0]
+
+    tmpdir = tempfile.mkdtemp(prefix="frust_")
+    try:
+        # Copy PDB to temp working directory
+        work_pdb = os.path.join(tmpdir, pdb_name)
+        shutil.copy2(pdb_path, work_pdb)
+
+        # Run frustratometer
+        cmd = ["perl", run_pl, pdb_name, mode, str(electrostatics_k)]
+        result = subprocess.run(
+            cmd,
+            cwd=tmpdir,
+            capture_output=True,
+            text=True,
+            timeout=600,
+        )
+
+        # Parse output: {pdb}.done/{pdb}_configurational
+        output_file = os.path.join(
+            tmpdir, f"{pdb_name}.done", f"{base_name}_{mode}"
+        )
+
+        if not os.path.exists(output_file):
+            # Try alternate naming patterns
+            alt_patterns = [
+                os.path.join(tmpdir, f"{pdb_name}.done", f"{pdb_name}_{mode}"),
+            ]
+            for alt in alt_patterns:
+                if os.path.exists(alt):
+                    output_file = alt
+                    break
+            else:
+                print(f"Frustratometer output not found for {pdb_name}")
+                return 0.0
+
+        # Parse frustration indices
+        # Format: #Res1 Res2 ChainRes1 ChainRes2 DensityRes1 DensityRes2
+        #         AA1 AA2 NativeEnergy DecoyEnergy SDEnergy FrstIndex Welltype FrstState
+        frustration_sum = 0.0
+        with open(output_file, "r") as fh:
+            for line in fh:
+                if line.startswith("#"):
+                    continue
+                parts = line.split()
+                if len(parts) < 14:
+                    continue
+
+                chain1 = parts[2]
+                chain2 = parts[3]
+
+                # Skip intra-chain (same chain) residue pairs
+                if chain1 == chain2:
+                    continue
+
+                # If partner_chains specified, only count pairs involving partner
+                if partner_chains is not None:
+                    if chain1 not in partner_chains and chain2 not in partner_chains:
+                        continue
+
+                # FrstIndex is the 4th-from-last column
+                try:
+                    frst_index = float(parts[-4])
+                    frustration_sum += frst_index
+                except (ValueError, IndexError):
+                    continue
+
+        return frustration_sum
+
+    except subprocess.TimeoutExpired:
+        print(f"Frustratometer timed out for {pdb_name}")
+        return 0.0
+    except Exception as e:
+        print(f"Frustratometer error for {pdb_name}: {e}")
+        return 0.0
+    finally:
+        # Clean up temp directory
+        shutil.rmtree(tmpdir, ignore_errors=True)
