@@ -36,6 +36,7 @@ tar -jxvf frustratometer.tar.bz2
 
 # Shape Complementarity is calculated using a standalone Python implementation
 # and does not require any additional external dependencies
+```
 
 ## SC Optimization (2026-05-09)
 
@@ -58,6 +59,12 @@ The Shape Complementarity (SC) calculator has been significantly improved:
 
 Both results are within the expected variation of the SCASA reference implementation
 (delta <0.02 from CCP4).
+
+### SCASA License
+
+The Connolly molecular surface generation (`connolly.py`) is derived from the
+[SCASA](https://github.com/WhalleyT/SCASA) project and is distributed under the
+**GNU General Public License v3.0 (GPL-3.0)**. See `SCASA_LICENSE` for details.
 ```
 
 ### Dependencies
@@ -327,23 +334,54 @@ The tool generates a CSV file with columns:
 - `dockq`: DockQ vs reference (af3-ref mode only)
 - `sc`: Shape complementarity score
 - `cpscore`: Contact preference score
+- `frustration_score`: Configurational frustration (Frustratometer2) sum over interface
 - `bsa`: Buried surface area
 - `interface_plddt`: Mean pLDDT at interface
 - `ramachandran`: PROCHECK-style phi/psi analysis
 - `interface_residues`: List of interface residue IDs
 
+## Frustration Scoring (Frustratometer2)
+
+The toolkit integrates [Frustratometer2](https://github.com/proteinphysiologylab/frustratometer2)
+for configurational frustration analysis of protein-protein interfaces. Frustration scores
+quantify the energetic local frustration at residue-residue contacts based on a
+AWSEM/LAMMPS statistical mechanics pipeline.
+
+### Integration
+
+- **Active pipeline**: `md_snapshots.py` computes `frustration_score` for each
+  trajectory snapshot by calling `core.metrics.compute_frustration_score()`
+- **Legacy wrapper**: `int-iscore-frustration-legacy` preserves the original
+  frustratometer2 batch workflow for standalone use
+
+### Method
+
+For each interface residue pair, Frustratometer2 computes a Frustration Index (FrstIndex)
+comparing the native (or predicted) energy to a decoy ensemble. The `frustration_score`
+column reports the sum of all inter-chain FrstIndex values at the interface.
+
+### Dependencies
+
+- Perl 5+ (`/usr/bin/perl`)
+- LAMMPS serial binary (`lmp_serial_12`) included in `frustratometer2-master/Scripts/`
+- AWSEM data files (included)
+
+### Usage
+
+Frustration scoring in `md-snapshots` mode is automatic when the `frustratometer2-master/`
+directory is present in the repository root. No additional configuration is needed.
+
 ## Legacy utility wrappers
 
-The package currently exposes two **legacy compatibility wrappers**:
+The package also exposes two legacy compatibility wrappers for historical workflows:
 
 - `int-iscore-frustration-legacy`
 - `int-iscore-input-data-legacy`
 
-These wrappers are intended to preserve access to historical repo-root workflows.
-They are **not** yet fully package-native modes and should be treated as source-tree-dependent
-compatibility entrypoints rather than stable release-grade APIs.
+These wrappers are **not** package-native modes and depend on the full source tree.
+They are maintained for backward compatibility only.
 
-Example execution commands:
+Example:
 
 ```bash
 # Legacy frustratometer batch workflow
@@ -352,9 +390,6 @@ int-iscore-frustration-legacy
 # Legacy benchmark / input-data generation workflow
 int-iscore-input-data-legacy
 ```
-
-These commands are expected to be run from a checked-out source tree that still contains
-the historical supporting files and templates used by the original scripts.
 
 ## DockQ Quality Thresholds
 
