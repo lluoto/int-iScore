@@ -35,9 +35,9 @@ static constexpr double PROBE_RADIUS       = 1.4;   // Å — water molecule pro
 static constexpr double DOT_DENSITY        = 15.0;  // dots per Å²
 static constexpr double TRIM_DISTANCE      = 1.5;   // Å — CCP4 trim band
 static constexpr double WEIGHT_ACCURATE    = 0.5;   // Å⁻² — CCP4 standard
-static constexpr double WEIGHT_FAST        = 0.08;  // Å⁻² — adjusted for SAS inflated surface
+static constexpr double WEIGHT_FAST        = 0.05;  // Å⁻² — adjusted for SAS inflated surface
 static constexpr double INTERFACE_DISTANCE = 8.0;   // Å — interface atom cutoff
-static constexpr double FAST_DISTANCE_CUTOFF = 3.0; // Å — hard truncation for FastSAS
+static constexpr double FAST_DISTANCE_CUTOFF = 4.0; // Å — hard truncation for FastSAS
 static constexpr double PI_VAL            = 3.14159265358979323846;
 static constexpr double PHI_GOLDEN        = 1.6180339887498948482;
 
@@ -454,9 +454,19 @@ static double score_fast_sas(const PointCloud& buried1,
             if (d > FAST_DISTANCE_CUTOFF) continue;
 
             int nn_idx = n_result;
-            double dprod = dot(buried1.nxs[i], buried1.nys[i], buried1.nzs[i],
+            // Gaussian Overlap: normal-vector-dominant scoring
+            // SAS surfaces are pushed apart at perfect interfaces (inverted distance),
+            // so we rely on normal direction anti-parallelism as the primary signal
+            double n_dot = dot(buried1.nxs[i], buried1.nys[i], buried1.nzs[i],
                                 buried2.nxs[nn_idx], buried2.nys[nn_idx], buried2.nzs[nn_idx]);
-            double s_val = -dprod * std::exp(-WEIGHT_FAST * out_dist_sq);
+
+            double normal_score = 0.0;
+            if (n_dot < 0.0) {
+                normal_score = -n_dot;  // 0 to 1, perfect complementarity = 1
+            }
+
+            double dist_penalty = std::exp(-WEIGHT_FAST * out_dist_sq);
+            double s_val = normal_score * dist_penalty;
             local_scores.push_back(s_val);
         }
 
