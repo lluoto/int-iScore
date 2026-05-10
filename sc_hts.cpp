@@ -835,6 +835,7 @@ static SCResult compute_sc_fast(const std::string& pdb_path,
 
     result.buried_dots = buried1.size() + buried2.size();
     result.trimmed_dots = 0;
+    result.median_d = 0.0;
 
     // Scoring
     double s_ab = score_fast_sas(buried1, buried2);
@@ -899,6 +900,7 @@ static SCResult compute_sc_accurate(const std::string& pdb_path,
     trim_band(buried2, acc2, trimmed2);
 
     result.trimmed_dots = trimmed1.size() + trimmed2.size();
+    result.median_d = 0.0;
 
     // Scoring: use outward normals convention, S = -(n1·n2) * exp(-w*d²)
     double s_ab = score_connolly(trimmed1, dots2);
