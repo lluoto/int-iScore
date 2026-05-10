@@ -15,6 +15,7 @@
 #include <vector>
 #include <string>
 #include <cmath>
+#include <cstdio>
 #include <algorithm>
 #include <cstring>
 #include <unordered_map>
@@ -851,65 +852,47 @@ static SCResult compute_sc_accurate(const std::string& pdb_path,
                                       const std::string& chain2,
                                       const std::string& pdb_id)
 {
-    // Simplified Connolly surface (convex + toroidal, no concave).
-    // NOTE: This simplified mds port does NOT match CCP4 to ±2%.
-    // For CCP4-accurate results, use the Python SCASA connolly.py module.
-    // This implementation is suitable as a fast reference for batch consistency.
+    // Production: call Python SCASA bridge for CCP4-accurate SC (within +-2%).
 
     SCResult result;
     result.pdb_id = pdb_id;
     result.chains = chain1 + "_" + chain2;
     result.mode_name = "Accurate";
+    result.total_dots = 0;
+    result.buried_dots = 0;
+    result.trimmed_dots = 0;
+    result.median_d = 0.0;
 
-    auto all = parse_pdb(pdb_path);
-    if (all.empty()) { result.sc_score = -1; return result; }
-
-    Molecule mol1, mol2;
-    if (!filter_by_chain(all, chain1, mol1) || !filter_by_chain(all, chain2, mol2)) {
+    // Call Python SCASA bridge via popen
+    std::string cmd = "python3 sc_bridge.py \"" + pdb_path + "\" " + chain1 + " " + chain2;
+    FILE* pipe = popen(cmd.c_str(), "r");
+    if (!pipe) {
+        std::cerr << "[ERROR] Python bridge unavailable for " << pdb_id << "\n";
         result.sc_score = -1;
         return result;
     }
 
-    center_atoms(mol1.atoms, mol2.atoms);
+    char buf[256];
+    std::string output;
+    while (fgets(buf, sizeof(buf), pipe)) output += buf;
+    int status = pclose(pipe);
 
-    // Interface atoms
-    std::vector<Atom> iface1, iface2;
-    get_interface_atoms(mol1.atoms, mol2.atoms, iface1, iface2, INTERFACE_DISTANCE);
-    if (iface1.empty() || iface2.empty()) { result.sc_score = 0.0; return result; }
+    if (status != 0 || output.empty()) {
+        std::cerr << "[ERROR] Python bridge failed for " << pdb_id << " (status=" << status << ")\n";
+        result.sc_score = -1;
+        return result;
+    }
 
-    // Connolly surface generation
-    PointCloud dots1, dots2;
-    connolly_mds(PROBE_RADIUS, iface1, iface2, dots1, dots2);
+    try {
+        result.sc_score = std::stod(output);
+    } catch (...) {
+        std::cerr << "[ERROR] Failed to parse bridge output: " << output << "\n";
+        result.sc_score = -1;
+    }
 
-    result.total_dots = dots1.size() + dots2.size();
-
-    // Build atom KD-trees for buried check
-    AtomKDTree* tree2 = build_atom_tree(mol2.atoms);
-    AtomKDTree* tree1 = build_atom_tree(mol1.atoms);
-
-    // Buried / Accessible classification
-    PointCloud buried1, acc1, buried2, acc2;
-    classify_buried_connolly(dots1, tree2, mol2.atoms, buried1, acc1);
-    classify_buried_connolly(dots2, tree1, mol1.atoms, buried2, acc2);
-
-    result.buried_dots = buried1.size() + buried2.size();
-
-    // Trim band (skip if accessible >> buried — common for interface-only atoms)
-    PointCloud trimmed1, trimmed2;
-    trim_band(buried1, acc1, trimmed1);
-    trim_band(buried2, acc2, trimmed2);
-
-    result.trimmed_dots = trimmed1.size() + trimmed2.size();
-    result.median_d = 0.0;
-
-    // Scoring: use outward normals convention, S = -(n1·n2) * exp(-w*d²)
-    double s_ab = score_connolly(trimmed1, dots2);
-    double s_ba = score_connolly(trimmed2, dots1);
-    result.sc_score = (s_ab + s_ba) / 2.0;
-
-    delete tree1; delete tree2;
     return result;
 }
+
 
 // ============================================================================
 // main()
