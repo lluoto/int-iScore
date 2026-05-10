@@ -917,7 +917,9 @@ static SCResult compute_sc_accurate(const std::string& pdb_path,
 int main(int argc, char* argv[]) {
     if (argc < 5) {
         std::cerr << "Usage: sc_hts <pdb_file> <chain1> <chain2> <mode> [pdb_id]\n";
-        std::cerr << "  mode: 0=FastSAS (coarse), 1=AccurateConnolly (precise)\n";
+        std::cerr << "  mode: 0=FastSAS, 1=AccurateConnolly, 2=Batch CSV\n";
+        std::cerr << "  Batch: sc_hts <jobs.csv> ? ? 2\n";
+        std::cerr << "  CSV format: pdb_path,chain1,chain2,mode[,pdb_id]\n";
         std::cerr << "Output (CSV): PDB_ID,Chains,Mode,TotalDots,BuriedDots,TrimmedDots,Median_D,Sc_Score\n";
         return 1;
     }
@@ -928,17 +930,62 @@ int main(int argc, char* argv[]) {
     int mode             = std::atoi(argv[4]);
     std::string pdb_id   = (argc > 5) ? argv[5] : pdb_path;
 
-    // Strip path from pdb_id
+#ifdef _OPENMP
+    omp_set_num_threads(omp_get_max_threads());
+#endif
+
+    // Batch mode: read CSV with job descriptions
+    if (mode == 2) {
+        std::cout << "PDB_ID,Chains,Mode,TotalDots,BuriedDots,TrimmedDots,Median_D,Sc_Score" << std::endl;
+        std::ifstream csv(pdb_path);
+        if (!csv.is_open()) { std::cerr << "Error: Cannot open batch file\n"; return 1; }
+        std::string line;
+        int line_num = 0;
+        while (std::getline(csv, line)) {
+            line_num++;
+            if (line.empty() || line[0] == '#') continue;
+            std::stringstream ss(line);
+            std::string fpath, c1, c2, mode_str, pid;
+            if (!std::getline(ss, fpath, ',') || !std::getline(ss, c1, ',') ||
+                !std::getline(ss, c2, ',') || !std::getline(ss, mode_str, ',')) {
+                std::cerr << "Skip malformed line " << line_num << "\n";
+                continue;
+            }
+            if (fpath == "pdb_path" || fpath.find("PDB") == 0) continue;
+            int line_mode = std::atoi(mode_str.c_str());
+            if (!std::getline(ss, pid)) pid = fpath;
+            size_t last_slash = pid.find_last_of("/\\");
+            if (last_slash != std::string::npos) pid = pid.substr(last_slash + 1);
+            size_t last_dot = pid.rfind('.');
+            if (last_dot != std::string::npos) pid = pid.substr(0, last_dot);
+
+            SCResult result;
+            auto t0 = std::chrono::steady_clock::now();
+            if (line_mode == 0) result = compute_sc_fast(fpath, c1, c2, pid);
+            else result = compute_sc_accurate(fpath, c1, c2, pid);
+            auto t1 = std::chrono::steady_clock::now();
+            double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
+
+            if (result.sc_score < 0) {
+                std::cerr << "[ERROR] " << pid << " failed\n";
+                continue;
+            }
+            std::cout << result.pdb_id << ", " << result.chains << ", "
+                      << result.mode_name << ", " << result.total_dots << ", "
+                      << result.buried_dots << ", " << result.trimmed_dots << ", "
+                      << result.median_d << ", " << result.sc_score << std::endl;
+            std::cerr << "[INFO] " << result.mode_name << " " << ms << "ms Sc=" << result.sc_score << std::endl;
+        }
+        return 0;
+    }
+
+    // Single PDB mode
     size_t last_slash = pdb_id.find_last_of("/\\");
     if (last_slash != std::string::npos) pdb_id = pdb_id.substr(last_slash + 1);
     size_t last_dot = pdb_id.rfind('.');
     if (last_dot != std::string::npos) pdb_id = pdb_id.substr(0, last_dot);
 
     SCResult result;
-
-#ifdef _OPENMP
-    omp_set_num_threads(omp_get_max_threads());
-#endif
 
     auto t0 = std::chrono::steady_clock::now();
 
@@ -966,3 +1013,4 @@ int main(int argc, char* argv[]) {
 
     return 0;
 }
+
