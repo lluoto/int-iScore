@@ -1,11 +1,18 @@
 // sc_hts.cpp — High-throughput Shape Complementarity (Sc) Engine
-// Two-tier architecture: FastSAS (coarse) + AccurateConnolly (precise)
+// Two-tier architecture: AccurateConnolly (production) + FastSAS (experimental)
 // C++17, nanoflann KD-Tree, OpenMP parallelized
 // Compile: g++ -std=c++17 -O3 -fopenmp sc_hts.cpp -o sc_hts
 //
+// DEFAULT MODE: AccurateConnolly (SCASA bridge, CCP4-grade, +/-2% accuracy)
+//   Accurate mode calls Python SCASA bridge via popen; requires sc_bridge.py in PATH.
+//
+// EXPERIMENTAL: FastSAS (mode 0) — under active development, does NOT yet generalize.
+//   See FASTSAS_ANALYSIS_PROMPT.md for current status and open challenges.
+//   Contributions welcome: https://github.com/lluoto/int-iScore
+//
 // Usage:
-//   sc_hts <pdb_file> <chain1> <chain2> <mode> [pdb_id]
-//   mode: 0=FastSAS, 1=AccurateConnolly
+//   sc_hts <pdb_file> <chain1> <chain2> [mode=1] [pdb_id]
+//   mode: 0=FastSAS(experimental), 1=AccurateConnolly(default)
 //
 // Output (CSV line to stdout): PDB_ID, Chains, Mode, TotalDots, BuriedDots, TrimmedDots, Median_D, Sc_Score
 
@@ -48,6 +55,7 @@ enum class FastMethod : int {
     VOXEL_DENSITY   = 0,  // Voxelized packing density (pure geometry, <30ms)
     SAS_FEATURE_REG = 1   // SAS surface feature-based regression (~250ms)
 };
+// EXPERIMENTAL: FastSAS scoring method (under development, needs optimization).
 // Change this constant to switch FastSAS scoring method:
 static constexpr FastMethod FAST_METHOD = FastMethod::SAS_FEATURE_REG;
 
@@ -1052,9 +1060,9 @@ static SCResult compute_sc_accurate(const std::string& pdb_path,
 // main()
 // ============================================================================
 int main(int argc, char* argv[]) {
-    if (argc < 5) {
-        std::cerr << "Usage: sc_hts <pdb_file> <chain1> <chain2> <mode> [pdb_id]\n";
-        std::cerr << "  mode: 0=FastSAS(Voxel/Feature), 1=AccurateConnolly, 2=Batch CSV\n";
+    if (argc < 4) {
+        std::cerr << "Usage: sc_hts <pdb_file> <chain1> <chain2> [mode=1] [pdb_id]\n";
+        std::cerr << "  mode: 0=FastSAS(experimental), 1=AccurateConnolly(default), 2=Batch CSV\n";
         std::cerr << "  Batch: sc_hts <jobs.csv> ? ? 2\n";
         std::cerr << "  CSV format: pdb_path,chain1,chain2,mode[,pdb_id]\n";
         std::cerr << "Output (CSV): PDB_ID,Chains,Mode,TotalDots,BuriedDots,TrimmedDots,Median_D,Sc_Score\n";
@@ -1064,7 +1072,7 @@ int main(int argc, char* argv[]) {
     std::string pdb_path = argv[1];
     std::string chain1   = argv[2];
     std::string chain2   = argv[3];
-    int mode             = std::atoi(argv[4]);
+    int mode             = (argc > 4) ? std::atoi(argv[4]) : 1;  // default: Accurate
     std::string pdb_id   = (argc > 5) ? argv[5] : pdb_path;
 
 #ifdef _OPENMP
@@ -1127,6 +1135,7 @@ int main(int argc, char* argv[]) {
     auto t0 = std::chrono::steady_clock::now();
 
     if (mode == 0) {
+        // EXPERIMENTAL FastSAS mode
         result = compute_sc_fast(pdb_path, chain1, chain2, pdb_id);
     } else {
         result = compute_sc_accurate(pdb_path, chain1, chain2, pdb_id);
