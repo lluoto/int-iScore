@@ -73,7 +73,7 @@ A C++17 two-tier Shape Complementarity engine for screening 10,000+ protein comp
 
 **Architecture:**
 - **Mode 0 (FastSAS)**: Solvent-accessible surface + KD-tree scoring. ~250 ms/complex.
-  Coarse filter for ranking large batches. Weight=0.08, distance cutoff=3.0 Angstrom.
+  Coarse filter for ranking large batches. Gaussian Overlap scoring (normal-vector-dominant): weight=0.05, distance cutoff=4.0 Angstrom.
 - **Mode 1 (Accurate)**: Calls Python SCASA bridge via popen for CCP4-accurate SC
   (within +/-2%). ~9-50 s/complex depending on complex size.
 - **Mode 2 (Batch)**: Reads CSV job list, processes sequentially, outputs combined CSV.
@@ -99,9 +99,11 @@ g++ -std=c++17 -O3 -fopenmp -I. sc_hts.cpp -o sc_hts
 
 | Mode      | SC      | Time     | Dots   | Accuracy       |
 |-----------|---------|----------|--------|----------------|
-| FastSAS   | 0.47    | 250 ms   | 425K   | Coarse filter  |
-| Accurate  | 0.585   | 9.5 s    | -      | CCP4 +/-1.5%   |
+| FastSAS   | 0.27    | 215 ms   | 425K   | Binary filter only (negatively correlated) |
+| Accurate  | 0.585   | 9.5 s    | -      | CCP4 +/-2%   |
 | CCP4 ref  | 0.616   | -        | -      | Gold standard  |
+
+**FastSAS Limitation:** Gaussian Overlap FastSAS is negatively correlated with CCP4 SC (r = -0.382 after optimization). Functions as a binary filter (SC > 0 vs SC = 0) only. For ranking, use Accurate mode.
 
 **Dependencies:** g++ 9+, OpenMP, nanoflann.hpp (bundled), Python 3 with int_iscore package
 

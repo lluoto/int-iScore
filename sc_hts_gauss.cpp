@@ -20,7 +20,6 @@
 #include <cstring>
 #include <unordered_map>
 #include <cfloat>
-#include <cstdint>
 #include <chrono>
 
 #include <nanoflann.hpp>
@@ -41,16 +40,6 @@ static constexpr double INTERFACE_DISTANCE = 8.0;   // Å — interface atom cut
 static constexpr double FAST_DISTANCE_CUTOFF = 4.0; // Å — hard truncation for FastSAS
 static constexpr double PI_VAL            = 3.14159265358979323846;
 static constexpr double PHI_GOLDEN        = 1.6180339887498948482;
-// ============================================================================
-// FastSAS scoring method selection (compile-time switch)
-// ============================================================================
-enum class FastMethod : int {
-    VOXEL_DENSITY   = 0,  // Voxelized packing density (pure geometry, <30ms)
-    SAS_FEATURE_REG = 1   // SAS surface feature-based regression (~250ms)
-};
-// Change this constant to switch FastSAS scoring method:
-static constexpr FastMethod FAST_METHOD = FastMethod::SAS_FEATURE_REG;
-
 
 // ============================================================================
 // Atom struct
@@ -85,73 +74,6 @@ struct PointCloud {
         nxs.push_back(nx); nys.push_back(ny); nzs.push_back(nz);
     }
 };
-// ============================================================================
-// VoxelGrid - 1D flat array for Method A (Voxelized Packing Density)
-// ============================================================================
-struct VoxelGrid {
-    double origin_x, origin_y, origin_z;
-    double voxel_size;
-    int nx, ny, nz;
-    int nxy;
-    std::vector<uint8_t> grid;
-
-    VoxelGrid(double ox, double oy, double oz, double sz,
-              int _nx, int _ny, int _nz)
-        : origin_x(ox), origin_y(oy), origin_z(oz), voxel_size(sz),
-          nx(_nx), ny(_ny), nz(_nz), nxy(_nx * _ny) {
-        grid.assign(nx * ny * nz, 0);
-    }
-
-    inline int idx(double x, double y, double z) const {
-        int ix = (int)((x - origin_x) / voxel_size);
-        int iy = (int)((y - origin_y) / voxel_size);
-        int iz = (int)((z - origin_z) / voxel_size);
-        if (ix < 0 || ix >= nx || iy < 0 || iy >= ny || iz < 0 || iz >= nz)
-            return -1;
-        return ix + iy * nx + iz * nxy;
-    }
-
-    void rasterize(const std::vector<Atom>& atoms, int chain_bit) {
-        uint8_t mask = (uint8_t)(1 << chain_bit);
-        double inv_vs = 1.0 / voxel_size;
-        #pragma omp parallel for
-        for (int ai = 0; ai < (int)atoms.size(); ++ai) {
-            const Atom& a = atoms[ai];
-            double R = a.radius + PROBE_RADIUS;  // SAS shell radius
-            double R2 = R * R;
-            int ix_min = std::max(0, (int)((a.x - R - origin_x) * inv_vs));
-            int ix_max = std::min(nx - 1, (int)((a.x + R - origin_x) * inv_vs));
-            int iy_min = std::max(0, (int)((a.y - R - origin_y) * inv_vs));
-            int iy_max = std::min(ny - 1, (int)((a.y + R - origin_y) * inv_vs));
-            int iz_min = std::max(0, (int)((a.z - R - origin_z) * inv_vs));
-            int iz_max = std::min(nz - 1, (int)((a.z + R - origin_z) * inv_vs));
-            for (int iz = iz_min; iz <= iz_max; ++iz) {
-                double dz = (iz * voxel_size + origin_z) - a.z;
-                for (int iy = iy_min; iy <= iy_max; ++iy) {
-                    double dy = (iy * voxel_size + origin_y) - a.y;
-                    for (int ix = ix_min; ix <= ix_max; ++ix) {
-                        double dx = (ix * voxel_size + origin_x) - a.x;
-                        if (dx*dx + dy*dy + dz*dz <= R2) {
-                            int ci = ix + iy * nx + iz * nxy;
-                            #pragma omp atomic
-                            grid[ci] |= mask;
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    void count(int& v_interlock, int& v_union) const {
-        v_interlock = 0; v_union = 0;
-        #pragma omp parallel for reduction(+:v_interlock, v_union)
-        for (int i = 0; i < (int)grid.size(); ++i) {
-            if (grid[i] != 0) ++v_union;
-            if (grid[i] == 0x03) ++v_interlock;
-        }
-    }
-};
-
 
 // ============================================================================
 // nanoflann adaptor for SOA PointCloud
@@ -499,120 +421,67 @@ static void classify_buried_fast(const PointCloud& sas, AtomKDTree* other_tree,
 }
 
 // ============================================================================
-// METHOD A: Voxelized Packing Density
+// MODE 1 Scoring: FastSAS
 // ============================================================================
-static double score_voxel_density(const std::vector<Atom>& iface1,
-                                   const std::vector<Atom>& iface2)
-{
-    if (iface1.empty() || iface2.empty()) return 0.0;
-    std::vector<Atom> all;
-    all.reserve(iface1.size() + iface2.size());
-    all.insert(all.end(), iface1.begin(), iface1.end());
-    all.insert(all.end(), iface2.begin(), iface2.end());
-    double min_x =  1e30, min_y =  1e30, min_z =  1e30;
-    double max_x = -1e30, max_y = -1e30, max_z = -1e30;
-    for (const auto& a : all) {
-        if (a.x - a.radius < min_x) min_x = a.x - a.radius;
-        if (a.y - a.radius < min_y) min_y = a.y - a.radius;
-        if (a.z - a.radius < min_z) min_z = a.z - a.radius;
-        if (a.x + a.radius > max_x) max_x = a.x + a.radius;
-        if (a.y + a.radius > max_y) max_y = a.y + a.radius;
-        if (a.z + a.radius > max_z) max_z = a.z + a.radius;
-    }
-    constexpr double MARGIN = 2.0;
-    min_x -= MARGIN; min_y -= MARGIN; min_z -= MARGIN;
-    max_x += MARGIN; max_y += MARGIN; max_z += MARGIN;
-    double vs = 0.5;
-    int nx = std::max(1, (int)((max_x - min_x) / vs) + 1);
-    int ny = std::max(1, (int)((max_y - min_y) / vs) + 1);
-    int nz = std::max(1, (int)((max_z - min_z) / vs) + 1);
-    constexpr int MAX_DIM = 200;
-    if (nx > MAX_DIM || ny > MAX_DIM || nz > MAX_DIM) {
-        double scale = std::max({(double)nx/MAX_DIM, (double)ny/MAX_DIM, (double)nz/MAX_DIM});
-        vs *= scale;
-        nx = std::max(1, (int)((max_x - min_x) / vs) + 1);
-        ny = std::max(1, (int)((max_y - min_y) / vs) + 1);
-        nz = std::max(1, (int)((max_z - min_z) / vs) + 1);
-    }
-    VoxelGrid g(min_x, min_y, min_z, vs, nx, ny, nz);
-    g.rasterize(iface1, 0);
-    g.rasterize(iface2, 1);
-    int v_interlock = 0, v_union = 0;
-    g.count(v_interlock, v_union);
-    if (v_union == 0) return 0.0;
-    // Scale to ~0-1 range (currently ~0.15, needs ~5x to match CCP4 range)
-    return 4.0 * (double)v_interlock / (double)v_union;
-}
-
-// ============================================================================
-// METHOD B: SAS Surface Feature-Based Regression
-// ============================================================================
-static double score_sas_features(const PointCloud& buried1,
-                                  const PointCloud& buried2,
-                                  int n_total1, int n_total2)
+static double score_fast_sas(const PointCloud& buried1,
+                              const PointCloud& buried2)
 {
     if (buried1.size() < 5 || buried2.size() < 5) return 0.0;
+
+    // Build KD-Tree for buried2
     SOAAdaptor<double> adaptor2(buried2);
     KDTree3D tree2(3, adaptor2, nanoflann::KDTreeSingleIndexAdaptorParams(10));
     tree2.buildIndex();
-    std::vector<double> distances;
-    distances.reserve(buried1.size());
-    int aligned_count = 0, total_pairs = 0;
-    double q[3]; unsigned int n_result;
+
+    std::vector<double> scores;
+    scores.reserve(buried1.size());
+
+    double q[3];
+    unsigned int n_result;
 
     #pragma omp parallel
     {
-        std::vector<double> local_dists;
-        local_dists.reserve(buried1.size() / omp_get_num_threads() + 1);
-        int local_aligned = 0, local_pairs = 0;
+        std::vector<double> local_scores;
+        local_scores.reserve(buried1.size() / omp_get_num_threads() + 1);
+
         #pragma omp for
         for (int i = 0; i < buried1.size(); ++i) {
             q[0] = buried1.xs[i]; q[1] = buried1.ys[i]; q[2] = buried1.zs[i];
             double out_dist_sq;
             tree2.knnSearch(q, 1, &n_result, &out_dist_sq);
-            int nn_idx = n_result;
+
             double d = std::sqrt(out_dist_sq);
-            local_dists.push_back(d);
-            ++local_pairs;
+            if (d > FAST_DISTANCE_CUTOFF) continue;
+
+            int nn_idx = n_result;
+            // Gaussian Overlap: normal-vector-dominant scoring
+            // SAS surfaces are pushed apart at perfect interfaces (inverted distance),
+            // so we rely on normal direction anti-parallelism as the primary signal
             double n_dot = dot(buried1.nxs[i], buried1.nys[i], buried1.nzs[i],
                                 buried2.nxs[nn_idx], buried2.nys[nn_idx], buried2.nzs[nn_idx]);
-            if (n_dot < -0.5) ++local_aligned;
+
+            double normal_score = 0.0;
+            if (n_dot < 0.0) {
+                normal_score = -n_dot;  // 0 to 1, perfect complementarity = 1
+            }
+
+            double dist_penalty = std::exp(-WEIGHT_FAST * out_dist_sq);
+            double s_val = normal_score * dist_penalty;
+            local_scores.push_back(s_val);
         }
+
         #pragma omp critical
-        {
-            distances.insert(distances.end(), local_dists.begin(), local_dists.end());
-            aligned_count += local_aligned;
-            total_pairs += local_pairs;
-        }
+        scores.insert(scores.end(), local_scores.begin(), local_scores.end());
     }
-    if (total_pairs == 0) return 0.0;
-    double f1 = (double)aligned_count / (double)total_pairs;
-    double d_mean = 0.0;
-    for (double d : distances) d_mean += d;
-    d_mean /= total_pairs;
-    double d_var = 0.0;
-    for (double d : distances) d_var += (d - d_mean) * (d - d_mean);
-    d_var /= total_pairs;
-    double f2 = (d_mean > 0.0) ? (std::sqrt(d_var) / d_mean) : 0.0;
-    double f3 = (double)(buried1.size() + buried2.size())
-              / (double)(n_total1 + n_total2);
-    size_t mid = distances.size() / 2;
-    std::nth_element(distances.begin(), distances.begin() + mid, distances.end());
-    double f4 = distances[mid];
-    // Weights — will be calibrated from 80-sample regression
-    // Calibrated weights: OLS on 80 samples (4 PDBs x 20 seeds)
-    // SC = -0.1903*F1 -0.2533*F2 + 1.4529*F3 -0.1406*F4 + 0.8523
-    // Pearson r = 0.7544 (vs Accurate/CCP4 SC)
-    constexpr double w1 = -0.1903;
-    constexpr double w2 = 0.2533;   // subtracted: -w2*F2
-    constexpr double w3 = 1.4529;
-    constexpr double w4 = 0.1406;   // subtracted: -w4*F4
-    constexpr double bias = 0.8523;
-    double feat_sc = w1 * f1 - w2 * f2 + w3 * f3 - w4 * f4 + bias;
-    // Feature values for reference / debug
-    // F1=norm_align F2=dist_CV F3=buried_ratio F4=median_d
-    return feat_sc;
+
+    if (scores.empty()) return 0.0;
+
+    // Median using nth_element (O(N))
+    size_t mid = scores.size() / 2;
+    std::nth_element(scores.begin(), scores.begin() + mid, scores.end());
+    return scores[mid];
 }
+
 // ============================================================================
 // MODE 2: Connolly Molecular Surface (simplified mds port)
 // ============================================================================
@@ -941,10 +810,7 @@ static SCResult compute_sc_fast(const std::string& pdb_path,
     SCResult result;
     result.pdb_id = pdb_id;
     result.chains = chain1 + "_" + chain2;
-    if constexpr (FAST_METHOD == FastMethod::VOXEL_DENSITY)
-        result.mode_name = "FastVoxel";
-    else
-        result.mode_name = "FastFeat";
+    result.mode_name = "FastSAS";
 
     auto all = parse_pdb(pdb_path);
     if (all.empty()) { result.sc_score = -1; return result; }
@@ -982,20 +848,10 @@ static SCResult compute_sc_fast(const std::string& pdb_path,
     result.trimmed_dots = 0;
     result.median_d = 0.0;
 
-    // Scoring - dispatch by FastMethod at compile time
-    if constexpr (FAST_METHOD == FastMethod::VOXEL_DENSITY) {
-        // Voxel method: use interface atoms directly
-        result.total_dots = (int)(iface1.size() + iface2.size());
-        result.buried_dots = 0;
-        result.sc_score = score_voxel_density(iface1, iface2);
-    } else {
-        // SAS feature regression method
-        double s_ab = score_sas_features(buried1, buried2,
-                                          (int)sas1.size(), (int)sas2.size());
-        double s_ba = score_sas_features(buried2, buried1,
-                                          (int)sas2.size(), (int)sas1.size());
-        result.sc_score = (s_ab + s_ba) / 2.0;
-    }
+    // Scoring
+    double s_ab = score_fast_sas(buried1, buried2);
+    double s_ba = score_fast_sas(buried2, buried1);
+    result.sc_score = (s_ab + s_ba) / 2.0;
 
     delete tree1; delete tree2;
     return result;
@@ -1054,7 +910,7 @@ static SCResult compute_sc_accurate(const std::string& pdb_path,
 int main(int argc, char* argv[]) {
     if (argc < 5) {
         std::cerr << "Usage: sc_hts <pdb_file> <chain1> <chain2> <mode> [pdb_id]\n";
-        std::cerr << "  mode: 0=FastSAS(Voxel/Feature), 1=AccurateConnolly, 2=Batch CSV\n";
+        std::cerr << "  mode: 0=FastSAS, 1=AccurateConnolly, 2=Batch CSV\n";
         std::cerr << "  Batch: sc_hts <jobs.csv> ? ? 2\n";
         std::cerr << "  CSV format: pdb_path,chain1,chain2,mode[,pdb_id]\n";
         std::cerr << "Output (CSV): PDB_ID,Chains,Mode,TotalDots,BuriedDots,TrimmedDots,Median_D,Sc_Score\n";
