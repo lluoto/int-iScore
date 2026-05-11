@@ -12,7 +12,7 @@
 //
 // Usage:
 //   sc_hts <pdb_file> <chain1> <chain2> [mode=1] [pdb_id]
-//   mode: 0=FastSAS(experimental), 1=AccurateConnolly(default)
+//   mode: 0=FastSAS_v4(experimental), 1=AccurateConnolly(default)
 //
 // Output (CSV line to stdout): PDB_ID, Chains, Mode, TotalDots, BuriedDots, TrimmedDots, Median_D, Sc_Score
 
@@ -49,14 +49,16 @@ static constexpr double FAST_DISTANCE_CUTOFF = 4.0; // Å — hard truncation fo
 static constexpr double PI_VAL            = 3.14159265358979323846;
 static constexpr double PHI_GOLDEN        = 1.6180339887498948482;
 // ============================================================================
-// FastSAS scoring method selection (compile-time switch)
+// FastSAS v4: GBDT Dual-Track Model (compile-time switch)
 // ============================================================================
+// EXPERIMENTAL — under active development.
+// 6 features: 3 micro (norm alignment, distance CV, median NN dist)
+//           + 3 macro (gap index, buried density, interface asymmetry)
+// Hardcoded 3-tree GBDT inference (trained externally in Python/sklearn).
+// Placeholder thresholds — replace with trained values after cross-validation.
 enum class FastMethod : int {
-    VOXEL_DENSITY   = 0,  // Voxelized packing density (pure geometry, <30ms)
-    SAS_FEATURE_REG = 1   // SAS surface feature-based regression (~250ms)
+    SAS_FEATURE_REG = 0   // GBDT feature regression (v4)
 };
-// EXPERIMENTAL: FastSAS scoring method (under development, needs optimization).
-// Change this constant to switch FastSAS scoring method:
 static constexpr FastMethod FAST_METHOD = FastMethod::SAS_FEATURE_REG;
 
 
@@ -93,74 +95,6 @@ struct PointCloud {
         nxs.push_back(nx); nys.push_back(ny); nzs.push_back(nz);
     }
 };
-// ============================================================================
-// VoxelGrid - 1D flat array for Method A (Voxelized Packing Density)
-// ============================================================================
-struct VoxelGrid {
-    double origin_x, origin_y, origin_z;
-    double voxel_size;
-    int nx, ny, nz;
-    int nxy;
-    std::vector<uint8_t> grid;
-
-    VoxelGrid(double ox, double oy, double oz, double sz,
-              int _nx, int _ny, int _nz)
-        : origin_x(ox), origin_y(oy), origin_z(oz), voxel_size(sz),
-          nx(_nx), ny(_ny), nz(_nz), nxy(_nx * _ny) {
-        grid.assign(nx * ny * nz, 0);
-    }
-
-    inline int idx(double x, double y, double z) const {
-        int ix = (int)((x - origin_x) / voxel_size);
-        int iy = (int)((y - origin_y) / voxel_size);
-        int iz = (int)((z - origin_z) / voxel_size);
-        if (ix < 0 || ix >= nx || iy < 0 || iy >= ny || iz < 0 || iz >= nz)
-            return -1;
-        return ix + iy * nx + iz * nxy;
-    }
-
-    void rasterize(const std::vector<Atom>& atoms, int chain_bit) {
-        uint8_t mask = (uint8_t)(1 << chain_bit);
-        double inv_vs = 1.0 / voxel_size;
-        #pragma omp parallel for
-        for (int ai = 0; ai < (int)atoms.size(); ++ai) {
-            const Atom& a = atoms[ai];
-            double R = a.radius + PROBE_RADIUS;  // SAS shell radius
-            double R2 = R * R;
-            int ix_min = std::max(0, (int)((a.x - R - origin_x) * inv_vs));
-            int ix_max = std::min(nx - 1, (int)((a.x + R - origin_x) * inv_vs));
-            int iy_min = std::max(0, (int)((a.y - R - origin_y) * inv_vs));
-            int iy_max = std::min(ny - 1, (int)((a.y + R - origin_y) * inv_vs));
-            int iz_min = std::max(0, (int)((a.z - R - origin_z) * inv_vs));
-            int iz_max = std::min(nz - 1, (int)((a.z + R - origin_z) * inv_vs));
-            for (int iz = iz_min; iz <= iz_max; ++iz) {
-                double dz = (iz * voxel_size + origin_z) - a.z;
-                for (int iy = iy_min; iy <= iy_max; ++iy) {
-                    double dy = (iy * voxel_size + origin_y) - a.y;
-                    for (int ix = ix_min; ix <= ix_max; ++ix) {
-                        double dx = (ix * voxel_size + origin_x) - a.x;
-                        if (dx*dx + dy*dy + dz*dz <= R2) {
-                            int ci = ix + iy * nx + iz * nxy;
-                            #pragma omp atomic
-                            grid[ci] |= mask;
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    void count(int& v_interlock, int& v_union) const {
-        v_interlock = 0; v_union = 0;
-        #pragma omp parallel for reduction(+:v_interlock, v_union)
-        for (int i = 0; i < (int)grid.size(); ++i) {
-            if (grid[i] != 0) ++v_union;
-            if (grid[i] == 0x03) ++v_interlock;
-        }
-    }
-};
-
-
 // ============================================================================
 // nanoflann adaptor for SOA PointCloud
 // ============================================================================
@@ -507,120 +441,8 @@ static void classify_buried_fast(const PointCloud& sas, AtomKDTree* other_tree,
 }
 
 // ============================================================================
-// METHOD A: Voxelized Packing Density
-// ============================================================================
-static double score_voxel_density(const std::vector<Atom>& iface1,
-                                   const std::vector<Atom>& iface2)
-{
-    if (iface1.empty() || iface2.empty()) return 0.0;
-    std::vector<Atom> all;
-    all.reserve(iface1.size() + iface2.size());
-    all.insert(all.end(), iface1.begin(), iface1.end());
-    all.insert(all.end(), iface2.begin(), iface2.end());
-    double min_x =  1e30, min_y =  1e30, min_z =  1e30;
-    double max_x = -1e30, max_y = -1e30, max_z = -1e30;
-    for (const auto& a : all) {
-        if (a.x - a.radius < min_x) min_x = a.x - a.radius;
-        if (a.y - a.radius < min_y) min_y = a.y - a.radius;
-        if (a.z - a.radius < min_z) min_z = a.z - a.radius;
-        if (a.x + a.radius > max_x) max_x = a.x + a.radius;
-        if (a.y + a.radius > max_y) max_y = a.y + a.radius;
-        if (a.z + a.radius > max_z) max_z = a.z + a.radius;
-    }
-    constexpr double MARGIN = 2.0;
-    min_x -= MARGIN; min_y -= MARGIN; min_z -= MARGIN;
-    max_x += MARGIN; max_y += MARGIN; max_z += MARGIN;
-    double vs = 0.5;
-    int nx = std::max(1, (int)((max_x - min_x) / vs) + 1);
-    int ny = std::max(1, (int)((max_y - min_y) / vs) + 1);
-    int nz = std::max(1, (int)((max_z - min_z) / vs) + 1);
-    constexpr int MAX_DIM = 200;
-    if (nx > MAX_DIM || ny > MAX_DIM || nz > MAX_DIM) {
-        double scale = std::max({(double)nx/MAX_DIM, (double)ny/MAX_DIM, (double)nz/MAX_DIM});
-        vs *= scale;
-        nx = std::max(1, (int)((max_x - min_x) / vs) + 1);
-        ny = std::max(1, (int)((max_y - min_y) / vs) + 1);
-        nz = std::max(1, (int)((max_z - min_z) / vs) + 1);
-    }
-    VoxelGrid g(min_x, min_y, min_z, vs, nx, ny, nz);
-    g.rasterize(iface1, 0);
-    g.rasterize(iface2, 1);
-    int v_interlock = 0, v_union = 0;
-    g.count(v_interlock, v_union);
-    if (v_union == 0) return 0.0;
-    // Scale to ~0-1 range (currently ~0.15, needs ~5x to match CCP4 range)
-    return 4.0 * (double)v_interlock / (double)v_union;
-}
 
 // ============================================================================
-// METHOD B: SAS Surface Feature-Based Regression
-// ============================================================================
-static double score_sas_features(const PointCloud& buried1,
-                                  const PointCloud& buried2,
-                                  int n_total1, int n_total2)
-{
-    if (buried1.size() < 5 || buried2.size() < 5) return 0.0;
-    SOAAdaptor<double> adaptor2(buried2);
-    KDTree3D tree2(3, adaptor2, nanoflann::KDTreeSingleIndexAdaptorParams(10));
-    tree2.buildIndex();
-    std::vector<double> distances;
-    distances.reserve(buried1.size());
-    int aligned_count = 0, total_pairs = 0;
-    double q[3]; unsigned int n_result;
-
-    #pragma omp parallel
-    {
-        std::vector<double> local_dists;
-        local_dists.reserve(buried1.size() / omp_get_num_threads() + 1);
-        int local_aligned = 0, local_pairs = 0;
-        #pragma omp for
-        for (int i = 0; i < buried1.size(); ++i) {
-            q[0] = buried1.xs[i]; q[1] = buried1.ys[i]; q[2] = buried1.zs[i];
-            double out_dist_sq;
-            tree2.knnSearch(q, 1, &n_result, &out_dist_sq);
-            int nn_idx = n_result;
-            double d = std::sqrt(out_dist_sq);
-            local_dists.push_back(d);
-            ++local_pairs;
-            double n_dot = dot(buried1.nxs[i], buried1.nys[i], buried1.nzs[i],
-                                buried2.nxs[nn_idx], buried2.nys[nn_idx], buried2.nzs[nn_idx]);
-            if (n_dot < -0.5) ++local_aligned;
-        }
-        #pragma omp critical
-        {
-            distances.insert(distances.end(), local_dists.begin(), local_dists.end());
-            aligned_count += local_aligned;
-            total_pairs += local_pairs;
-        }
-    }
-    if (total_pairs == 0) return 0.0;
-    double f1 = (double)aligned_count / (double)total_pairs;
-    double d_mean = 0.0;
-    for (double d : distances) d_mean += d;
-    d_mean /= total_pairs;
-    double d_var = 0.0;
-    for (double d : distances) d_var += (d - d_mean) * (d - d_mean);
-    d_var /= total_pairs;
-    double f2 = (d_mean > 0.0) ? (std::sqrt(d_var) / d_mean) : 0.0;
-    double f3 = (double)(buried1.size() + buried2.size())
-              / (double)(n_total1 + n_total2);
-    size_t mid = distances.size() / 2;
-    std::nth_element(distances.begin(), distances.begin() + mid, distances.end());
-    double f4 = distances[mid];
-    // Weights — will be calibrated from 80-sample regression
-    // Calibrated weights: OLS on 80 samples (4 PDBs x 20 seeds)
-    // SC = -0.1903*F1 -0.2533*F2 + 1.4529*F3 -0.1406*F4 + 0.8523
-    // Pearson r = 0.7544 (vs Accurate/CCP4 SC)
-    constexpr double w1 = -0.1903;
-    constexpr double w2 = 0.2533;   // subtracted: -w2*F2
-    constexpr double w3 = 1.4529;
-    constexpr double w4 = 0.1406;   // subtracted: -w4*F4
-    constexpr double bias = 0.8523;
-    double feat_sc = w1 * f1 - w2 * f2 + w3 * f3 - w4 * f4 + bias;
-    // Feature values for reference / debug
-    // F1=norm_align F2=dist_CV F3=buried_ratio F4=median_d
-    return feat_sc;
-}
 // ============================================================================
 // MODE 2: Connolly Molecular Surface (simplified mds port)
 // ============================================================================
@@ -941,6 +763,11 @@ struct SCResult {
     double sc_score;
 };
 
+// Forward declaration: score_sas_features (defined below after GBDT structs)
+static double score_sas_features(const PointCloud& buried1,
+                                  const PointCloud& buried2,
+                                  int n_total1, int n_total2);
+
 static SCResult compute_sc_fast(const std::string& pdb_path,
                                  const std::string& chain1,
                                  const std::string& chain2,
@@ -949,10 +776,7 @@ static SCResult compute_sc_fast(const std::string& pdb_path,
     SCResult result;
     result.pdb_id = pdb_id;
     result.chains = chain1 + "_" + chain2;
-    if constexpr (FAST_METHOD == FastMethod::VOXEL_DENSITY)
-        result.mode_name = "FastVoxel";
-    else
-        result.mode_name = "FastFeat";
+    result.mode_name = "FastFeat_v4";
 
     auto all = parse_pdb(pdb_path);
     if (all.empty()) { result.sc_score = -1; return result; }
@@ -991,19 +815,12 @@ static SCResult compute_sc_fast(const std::string& pdb_path,
     result.median_d = 0.0;
 
     // Scoring - dispatch by FastMethod at compile time
-    if constexpr (FAST_METHOD == FastMethod::VOXEL_DENSITY) {
-        // Voxel method: use interface atoms directly
-        result.total_dots = (int)(iface1.size() + iface2.size());
-        result.buried_dots = 0;
-        result.sc_score = score_voxel_density(iface1, iface2);
-    } else {
-        // SAS feature regression method
-        double s_ab = score_sas_features(buried1, buried2,
-                                          (int)sas1.size(), (int)sas2.size());
-        double s_ba = score_sas_features(buried2, buried1,
-                                          (int)sas2.size(), (int)sas1.size());
-        result.sc_score = (s_ab + s_ba) / 2.0;
-    }
+    // FastSAS v4: GBDT feature regression (bidirectional averaging)
+    double s_ab = score_sas_features(buried1, buried2,
+                                      (int)sas1.size(), (int)sas2.size());
+    double s_ba = score_sas_features(buried2, buried1,
+                                      (int)sas2.size(), (int)sas1.size());
+    result.sc_score = (s_ab + s_ba) / 2.0;
 
     delete tree1; delete tree2;
     return result;
@@ -1062,7 +879,7 @@ static SCResult compute_sc_accurate(const std::string& pdb_path,
 int main(int argc, char* argv[]) {
     if (argc < 4) {
         std::cerr << "Usage: sc_hts <pdb_file> <chain1> <chain2> [mode=1] [pdb_id]\n";
-        std::cerr << "  mode: 0=FastSAS(experimental), 1=AccurateConnolly(default), 2=Batch CSV\n";
+        std::cerr << "  mode: 0=FastSAS_v4(experimental), 1=AccurateConnolly(default), 2=Batch CSV\n";
         std::cerr << "  Batch: sc_hts <jobs.csv> ? ? 2\n";
         std::cerr << "  CSV format: pdb_path,chain1,chain2,mode[,pdb_id]\n";
         std::cerr << "Output (CSV): PDB_ID,Chains,Mode,TotalDots,BuriedDots,TrimmedDots,Median_D,Sc_Score\n";
@@ -1159,4 +976,188 @@ int main(int argc, char* argv[]) {
 
     return 0;
 }
+
+// METHOD: FastSAS v4 — GBDT Dual-Track Model (Micro + Macro Features)
+// ============================================================================
+// Uses 6 features extracted from SAS buried surface dots + interface geometry.
+// Scoring: hardcoded 3-tree GBDT (depth=3, lr=0.1) trained externally in Python.
+// Placeholder thresholds — calibrate on 12-PDB dataset before production use.
+// ============================================================================
+static double score_sas_features(const PointCloud& buried1,
+                                  const PointCloud& buried2,
+                                  int n_total1, int n_total2)
+{
+    if (buried1.size() < 5 || buried2.size() < 5) return 0.0;
+
+    // Build KD-tree for buried2
+    SOAAdaptor<double> adaptor2(buried2);
+    KDTree3D tree2(3, adaptor2, nanoflann::KDTreeSingleIndexAdaptorParams(10));
+    tree2.buildIndex();
+
+    // ---------- Pass 1: NN distances, normal alignment ----------
+    std::vector<double> distances;
+    distances.reserve(buried1.size());
+    int aligned_count = 0, total_pairs = 0;
+    double q[3]; unsigned int n_result;
+
+    #pragma omp parallel
+    {
+        std::vector<double> local_dists;
+        local_dists.reserve((int)buried1.size() / omp_get_num_threads() + 1);
+        int local_aligned = 0, local_pairs = 0;
+        #pragma omp for
+        for (int i = 0; i < (int)buried1.size(); ++i) {
+            q[0] = buried1.xs[i]; q[1] = buried1.ys[i]; q[2] = buried1.zs[i];
+            double out_dist_sq;
+            tree2.knnSearch(q, 1, &n_result, &out_dist_sq);
+            int nn_idx = (int)n_result;
+            double d = std::sqrt(out_dist_sq);
+            local_dists.push_back(d);
+            ++local_pairs;
+            double n_dot = dot(buried1.nxs[i], buried1.nys[i], buried1.nzs[i],
+                                buried2.nxs[nn_idx], buried2.nys[nn_idx], buried2.nzs[nn_idx]);
+            if (n_dot < -0.5) ++local_aligned;
+        }
+        #pragma omp critical
+        {
+            distances.insert(distances.end(), local_dists.begin(), local_dists.end());
+            aligned_count += local_aligned;
+            total_pairs += local_pairs;
+        }
+    }
+
+    if (total_pairs == 0) return 0.0;
+
+    // ---------- Feature extraction ----------
+    // F1: Normal alignment rate (micro)
+    double f1 = (double)aligned_count / (double)total_pairs;
+
+    // F2: Distance CV (micro)
+    double d_mean = 0.0;
+    for (double d : distances) d_mean += d;
+    d_mean /= total_pairs;
+    double d_var = 0.0;
+    for (double d : distances) d_var += (d - d_mean) * (d - d_mean);
+    d_var /= total_pairs;
+    double f2 = (d_mean > 0.0) ? (std::sqrt(d_var) / d_mean) : 0.0;
+
+    // F3: Median NN distance (micro)
+    size_t mid = distances.size() / 2;
+    std::nth_element(distances.begin(), distances.begin() + mid, distances.end());
+    double f3 = distances[mid];
+
+    // ---- Macro features: 3D Bounding Box from buried SAS dots ----
+    double min_x =  1e30, min_y =  1e30, min_z =  1e30;
+    double max_x = -1e30, max_y = -1e30, max_z = -1e30;
+    size_t n_total_buried = buried1.size() + buried2.size();
+
+    for (int i = 0; i < (int)buried1.size(); ++i) {
+        if (buried1.xs[i] < min_x) min_x = buried1.xs[i];
+        if (buried1.ys[i] < min_y) min_y = buried1.ys[i];
+        if (buried1.zs[i] < min_z) min_z = buried1.zs[i];
+        if (buried1.xs[i] > max_x) max_x = buried1.xs[i];
+        if (buried1.ys[i] > max_y) max_y = buried1.ys[i];
+        if (buried1.zs[i] > max_z) max_z = buried1.zs[i];
+    }
+    for (int i = 0; i < (int)buried2.size(); ++i) {
+        if (buried2.xs[i] < min_x) min_x = buried2.xs[i];
+        if (buried2.ys[i] < min_y) min_y = buried2.ys[i];
+        if (buried2.zs[i] < min_z) min_z = buried2.zs[i];
+        if (buried2.xs[i] > max_x) max_x = buried2.xs[i];
+        if (buried2.ys[i] > max_y) max_y = buried2.ys[i];
+        if (buried2.zs[i] > max_z) max_z = buried2.zs[i];
+    }
+
+    double box_vol = (max_x - min_x) * (max_y - min_y) * (max_z - min_z);
+    if (box_vol < 1e-12) box_vol = 1e-12;
+
+    // F4: Gap index = Box_Volume / N_buried (smaller = tighter packing)
+    double f4 = box_vol / (double)n_total_buried;
+
+    // F5: Buried density = N_buried / Box_Volume (larger = tighter packing)
+    double f5 = (double)n_total_buried / box_vol;
+
+    // F6: Interface asymmetry = |N1 - N2| / (N1 + N2)
+    double f6 = std::abs((double)(buried1.size() - buried2.size()))
+              / (double)(buried1.size() + buried2.size());
+
+    // ---------- GBDT Inference (3 trees, depth 3, lr=0.1) ----------
+    // PLACEHOLDER: thresholds trained externally (Python sklearn).
+    // Replace these arrays with trained values after cross-validation.
+    // Tree structure: 7 internal nodes (indexed 0-6), 8 leaves (indexed 0-7).
+    // For node i: left child = 2*i+1, right child = 2*i+2.
+
+    struct GBTree {
+        int    feature[7];
+        double threshold[7];
+        double leaf[8];
+    };
+
+    // Tree 0 — PLACEHOLDER
+    GBTree t0;
+    t0.feature[0] = 3;  t0.threshold[0] = 2.0;
+    t0.feature[1] = 0;  t0.threshold[1] = 0.4;
+    t0.feature[2] = 5;  t0.threshold[2] = 0.3;
+    t0.feature[3] = 1;  t0.threshold[3] = 0.5;
+    t0.feature[4] = 4;  t0.threshold[4] = 1.0;
+    t0.feature[5] = 2;  t0.threshold[5] = 3.0;
+    t0.feature[6] = 3;  t0.threshold[6] = 1.5;
+    t0.leaf[0] = 0.50; t0.leaf[1] = 0.55; t0.leaf[2] = 0.52; t0.leaf[3] = 0.58;
+    t0.leaf[4] = 0.60; t0.leaf[5] = 0.62; t0.leaf[6] = 0.56; t0.leaf[7] = 0.65;
+
+    // Tree 1 — PLACEHOLDER
+    GBTree t1;
+    t1.feature[0] = 5;  t1.threshold[0] = 0.2;
+    t1.feature[1] = 2;  t1.threshold[1] = 2.5;
+    t1.feature[2] = 0;  t1.threshold[2] = 0.5;
+    t1.feature[3] = 4;  t1.threshold[3] = 1.5;
+    t1.feature[4] = 3;  t1.threshold[4] = 3.0;
+    t1.feature[5] = 1;  t1.threshold[5] = 0.4;
+    t1.feature[6] = 2;  t1.threshold[6] = 2.0;
+    t1.leaf[0] = 0.48; t1.leaf[1] = 0.53; t1.leaf[2] = 0.57; t1.leaf[3] = 0.60;
+    t1.leaf[4] = 0.55; t1.leaf[5] = 0.59; t1.leaf[6] = 0.63; t1.leaf[7] = 0.67;
+
+    // Tree 2 — PLACEHOLDER
+    GBTree t2;
+    t2.feature[0] = 4;  t2.threshold[0] = 0.8;
+    t2.feature[1] = 0;  t2.threshold[1] = 0.3;
+    t2.feature[2] = 1;  t2.threshold[2] = 0.6;
+    t2.feature[3] = 3;  t2.threshold[3] = 2.5;
+    t2.feature[4] = 5;  t2.threshold[4] = 0.25;
+    t2.feature[5] = 2;  t2.threshold[5] = 3.5;
+    t2.feature[6] = 4;  t2.threshold[6] = 1.2;
+    t2.leaf[0] = 0.45; t2.leaf[1] = 0.51; t2.leaf[2] = 0.54; t2.leaf[3] = 0.58;
+    t2.leaf[4] = 0.61; t2.leaf[5] = 0.56; t2.leaf[6] = 0.64; t2.leaf[7] = 0.68;
+
+    constexpr double LR = 0.1;
+    constexpr double BIAS = 0.52;
+
+    // Inference: walk each tree, accumulate leaf values
+    auto walk_tree = [](const GBTree& t, const double* feat) {
+        int node = 0;
+        for (int d = 0; d < 3; ++d) {
+            int left   = 2 * node + 1;
+            int right  = 2 * node + 2;
+            int feat_i = t.feature[node];
+            if (feat[feat_i] < t.threshold[node])
+                node = left;
+            else
+                node = right;
+        }
+        int leaf_idx = node - 7;
+        return t.leaf[leaf_idx];
+    };
+
+    double features[6] = { f1, f2, f3, f4, f5, f6 };
+    double pred = BIAS;
+    pred += LR * walk_tree(t0, features);
+    pred += LR * walk_tree(t1, features);
+    pred += LR * walk_tree(t2, features);
+
+    if (pred < 0.0) pred = 0.0;
+    if (pred > 1.0) pred = 1.0;
+
+    return pred;
+}
+
 
