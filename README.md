@@ -72,9 +72,9 @@ The Connolly molecular surface generation (`connolly.py`) is derived from the
 A C++17 two-tier Shape Complementarity engine for screening 10,000+ protein complexes.
 
 **Architecture:**
-- **Mode 0 (FastSAS)**: Solvent-accessible surface + KD-tree scoring. ~250 ms/complex.
+- **Mode 0 (FastSAS, EXPERIMENTAL)**: Two scoring methods (Voxel density + Feature regression). ~200 ms/complex. **Under active development — does NOT yet generalize across PDBs.** See FASTSAS_ANALYSIS_PROMPT.md for current status.
   Coarse filter for ranking large batches. Gaussian Overlap scoring (normal-vector-dominant): weight=0.05, distance cutoff=4.0 Angstrom.
-- **Mode 1 (Accurate)**: Calls Python SCASA bridge via popen for CCP4-accurate SC
+- **Mode 1 (Accurate, DEFAULT)**: Calls Python SCASA bridge via popen for CCP4-accurate SC (±2%)
   (within +/-2%). ~9-50 s/complex depending on complex size.
 - **Mode 2 (Batch)**: Reads CSV job list, processes sequentially, outputs combined CSV.
 
@@ -99,11 +99,16 @@ g++ -std=c++17 -O3 -fopenmp -I. sc_hts.cpp -o sc_hts
 
 | Mode      | SC      | Time     | Dots   | Accuracy       |
 |-----------|---------|----------|--------|----------------|
-| FastSAS   | 0.27    | 215 ms   | 425K   | Binary filter only (negatively correlated) |
+| FastSAS (experimental) | 0.58    | 200 ms   | 400K   | Under development (does not generalize) |
 | Accurate  | 0.585   | 9.5 s    | -      | CCP4 +/-2%   |
 | CCP4 ref  | 0.616   | -        | -      | Gold standard  |
 
-**FastSAS Limitation:** Gaussian Overlap FastSAS is negatively correlated with CCP4 SC (r = -0.382 after optimization). Functions as a binary filter (SC > 0 vs SC = 0) only. For ranking, use Accurate mode.
+**FastSAS Development Status:** FastScoring is under active development. Current approaches:
+- **Voxel density** (v2): poor cross-PDB discrimination (r = -0.34)
+- **4-feature linear regression** (v3): overfits training set (calibration r=+0.75, cross-validation r=-0.15)
+- **GBDT dual-track model** (v4): planned, see FASTSAS_ANALYSIS_PROMPT.md
+
+**For production use, Accurate mode is the default and only reliable option.**
 
 **Dependencies:** g++ 9+, OpenMP, nanoflann.hpp (bundled), Python 3 with int_iscore package
 
