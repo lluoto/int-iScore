@@ -6,13 +6,13 @@
 // DEFAULT MODE: AccurateConnolly (SCASA bridge, CCP4-grade, +/-2% accuracy)
 //   Accurate mode calls Python SCASA bridge via popen; requires sc_bridge.py in PATH.
 //
-// EXPERIMENTAL: FastSAS (mode 0) — under active development, does NOT yet generalize.
-//   See FASTSAS_ANALYSIS_PROMPT.md for current status and open challenges.
+// DEPRECATED: FastSAS (mode 0) failed cross-PDB validation (r=-0.69).
+//   Use ONLY for intra-PDB coarse ranking / prefiltering; Accurate is production truth.
 //   Contributions welcome: https://github.com/lluoto/int-iScore
 //
 // Usage:
 //   sc_hts <pdb_file> <chain1> <chain2> [mode=1] [pdb_id]
-//   mode: 0=FastSAS_v4(experimental), 1=AccurateConnolly(default)
+//   mode: 0=FastSAS_DEPRECATED(intra-PDB prefilter only), 1=AccurateConnolly(default)
 //
 // Output (CSV line to stdout): PDB_ID, Chains, Mode, TotalDots, BuriedDots, TrimmedDots, Median_D, Sc_Score
 
@@ -29,6 +29,7 @@
 #include <cfloat>
 #include <cstdint>
 #include <chrono>
+#include <cstdlib>
 
 #include <nanoflann.hpp>
 
@@ -49,9 +50,9 @@ static constexpr double FAST_DISTANCE_CUTOFF = 4.0; // Å — hard truncation fo
 static constexpr double PI_VAL            = 3.14159265358979323846;
 static constexpr double PHI_GOLDEN        = 1.6180339887498948482;
 // ============================================================================
-// FastSAS v4: GBDT Dual-Track Model (compile-time switch)
+// FastSAS v4: DEPRECATED intra-PDB coarse prefilter (compile-time switch)
 // ============================================================================
-// EXPERIMENTAL — under active development.
+// DEPRECATED: Cross-PDB correlation failed (r=-0.69). Use ONLY for intra-PDB coarse ranking.
 // 6 features: 3 micro (norm alignment, distance CV, median NN dist)
 //           + 3 macro (gap index, buried density, interface asymmetry)
 // Hardcoded 3-tree GBDT inference (trained externally in Python/sklearn).
@@ -776,7 +777,7 @@ static SCResult compute_sc_fast(const std::string& pdb_path,
     SCResult result;
     result.pdb_id = pdb_id;
     result.chains = chain1 + "_" + chain2;
-    result.mode_name = "FastFeat_v4";
+    result.mode_name = "FastSAS_DEPRECATED";
 
     auto all = parse_pdb(pdb_path);
     if (all.empty()) { result.sc_score = -1; return result; }
@@ -879,7 +880,7 @@ static SCResult compute_sc_accurate(const std::string& pdb_path,
 int main(int argc, char* argv[]) {
     if (argc < 4) {
         std::cerr << "Usage: sc_hts <pdb_file> <chain1> <chain2> [mode=1] [pdb_id]\n";
-        std::cerr << "  mode: 0=FastSAS_v4(experimental), 1=AccurateConnolly(default), 2=Batch CSV\n";
+        std::cerr << "  mode: 0=FastSAS_DEPRECATED(intra-PDB prefilter only), 1=AccurateConnolly(default), 2=Batch CSV\n";
         std::cerr << "  Batch: sc_hts <jobs.csv> ? ? 2\n";
         std::cerr << "  CSV format: pdb_path,chain1,chain2,mode[,pdb_id]\n";
         std::cerr << "Output (CSV): PDB_ID,Chains,Mode,TotalDots,BuriedDots,TrimmedDots,Median_D,Sc_Score\n";
@@ -896,11 +897,35 @@ int main(int argc, char* argv[]) {
     omp_set_num_threads(omp_get_max_threads());
 #endif
 
-    // Batch mode: read CSV with job descriptions
+    // Batch mode: read CSV with job descriptions.
+    // Accurate jobs are dispatched through ONE Python process:
+    //   sc_bridge.py --batch tasks.txt --output results.csv
+    // This avoids launching Python once per complex.
     if (mode == 2) {
-        std::cout << "PDB_ID,Chains,Mode,TotalDots,BuriedDots,TrimmedDots,Median_D,Sc_Score" << std::endl;
+        struct BatchJob {
+            std::string fpath, c1, c2, pid;
+            int line_mode;
+        };
+
+        auto trim = [](std::string v) {
+            size_t a = v.find_first_not_of(" \t\r\n");
+            size_t b = v.find_last_not_of(" \t\r\n");
+            if (a == std::string::npos) return std::string();
+            return v.substr(a, b - a + 1);
+        };
+
+        auto normalize_pid = [](std::string pid) {
+            size_t last_slash = pid.find_last_of("/\\");
+            if (last_slash != std::string::npos) pid = pid.substr(last_slash + 1);
+            size_t last_dot = pid.rfind('.');
+            if (last_dot != std::string::npos) pid = pid.substr(0, last_dot);
+            return pid;
+        };
+
         std::ifstream csv(pdb_path);
         if (!csv.is_open()) { std::cerr << "Error: Cannot open batch file\n"; return 1; }
+
+        std::vector<BatchJob> jobs;
         std::string line;
         int line_num = 0;
         while (std::getline(csv, line)) {
@@ -913,30 +938,92 @@ int main(int argc, char* argv[]) {
                 std::cerr << "Skip malformed line " << line_num << "\n";
                 continue;
             }
+            fpath = trim(fpath); c1 = trim(c1); c2 = trim(c2); mode_str = trim(mode_str);
             if (fpath == "pdb_path" || fpath.find("PDB") == 0) continue;
-            int line_mode = std::atoi(mode_str.c_str());
             if (!std::getline(ss, pid)) pid = fpath;
-            size_t last_slash = pid.find_last_of("/\\");
-            if (last_slash != std::string::npos) pid = pid.substr(last_slash + 1);
-            size_t last_dot = pid.rfind('.');
-            if (last_dot != std::string::npos) pid = pid.substr(0, last_dot);
+            pid = normalize_pid(trim(pid));
+            jobs.push_back({fpath, c1, c2, pid, std::atoi(mode_str.c_str())});
+        }
 
-            SCResult result;
+        std::vector<std::string> output_lines(jobs.size());
+        std::vector<size_t> accurate_indices;
+        std::cout << "PDB_ID,Chains,Mode,TotalDots,BuriedDots,TrimmedDots,Median_D,Sc_Score" << std::endl;
+
+        for (size_t i = 0; i < jobs.size(); ++i) {
+            const auto& j = jobs[i];
+            if (j.line_mode == 0) {
+                auto t0 = std::chrono::steady_clock::now();
+                SCResult result = compute_sc_fast(j.fpath, j.c1, j.c2, j.pid);
+                auto t1 = std::chrono::steady_clock::now();
+                double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
+                if (result.sc_score < 0) {
+                    std::cerr << "[ERROR] " << j.pid << " FastSAS failed\n";
+                    continue;
+                }
+                std::ostringstream os;
+                os << result.pdb_id << ", " << result.chains << ", "
+                   << result.mode_name << ", " << result.total_dots << ", "
+                   << result.buried_dots << ", " << result.trimmed_dots << ", "
+                   << result.median_d << ", " << result.sc_score;
+                output_lines[i] = os.str();
+                std::cerr << "[WARN] FastSAS_DEPRECATED: Cross-PDB correlation failed (r=-0.69). "
+                          << "Use ONLY for intra-PDB coarse ranking.\n";
+                std::cerr << "[INFO] " << result.mode_name << " " << ms << "ms Sc=" << result.sc_score << std::endl;
+            } else {
+                accurate_indices.push_back(i);
+            }
+        }
+
+        if (!accurate_indices.empty()) {
+            auto now = std::chrono::high_resolution_clock::now().time_since_epoch().count();
+            std::string prefix = "/tmp/sc_hts_batch_" + std::to_string(now);
+            std::string task_file = prefix + ".tasks.csv";
+            std::string result_file = prefix + ".results.csv";
+
+            std::ofstream tasks(task_file);
+            if (!tasks.is_open()) { std::cerr << "Error: Cannot write temp tasks file\n"; return 1; }
+            for (size_t idx : accurate_indices) {
+                const auto& j = jobs[idx];
+                tasks << j.fpath << "," << j.c1 << "," << j.c2 << "," << j.pid << "\n";
+            }
+            tasks.close();
+
             auto t0 = std::chrono::steady_clock::now();
-            if (line_mode == 0) result = compute_sc_fast(fpath, c1, c2, pid);
-            else result = compute_sc_accurate(fpath, c1, c2, pid);
+            std::string cmd = "python3 sc_bridge.py --batch \"" + task_file + "\" --output \"" + result_file + "\"";
+            int status = std::system(cmd.c_str());
             auto t1 = std::chrono::steady_clock::now();
             double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
-
-            if (result.sc_score < 0) {
-                std::cerr << "[ERROR] " << pid << " failed\n";
-                continue;
+            if (status != 0) {
+                std::cerr << "[ERROR] Python batch bridge failed (status=" << status << ")\n";
+                std::remove(task_file.c_str());
+                std::remove(result_file.c_str());
+                return 1;
             }
-            std::cout << result.pdb_id << ", " << result.chains << ", "
-                      << result.mode_name << ", " << result.total_dots << ", "
-                      << result.buried_dots << ", " << result.trimmed_dots << ", "
-                      << result.median_d << ", " << result.sc_score << std::endl;
-            std::cerr << "[INFO] " << result.mode_name << " " << ms << "ms Sc=" << result.sc_score << std::endl;
+
+            std::ifstream results(result_file);
+            if (!results.is_open()) {
+                std::cerr << "[ERROR] Cannot open Python batch results: " << result_file << "\n";
+                std::remove(task_file.c_str());
+                return 1;
+            }
+            std::string rline;
+            size_t k = 0;
+            while (std::getline(results, rline)) {
+                if (rline.empty() || rline.find("PDB_ID") == 0) continue;
+                if (k < accurate_indices.size()) output_lines[accurate_indices[k++]] = rline;
+            }
+            if (k != accurate_indices.size()) {
+                std::cerr << "[WARN] Python batch returned " << k << " rows for "
+                          << accurate_indices.size() << " Accurate jobs\n";
+            }
+            std::cerr << "[INFO] Accurate batch " << accurate_indices.size()
+                      << " jobs completed in " << ms << "ms\n";
+            std::remove(task_file.c_str());
+            std::remove(result_file.c_str());
+        }
+
+        for (const auto& out : output_lines) {
+            if (!out.empty()) std::cout << out << std::endl;
         }
         return 0;
     }
@@ -952,7 +1039,7 @@ int main(int argc, char* argv[]) {
     auto t0 = std::chrono::steady_clock::now();
 
     if (mode == 0) {
-        // EXPERIMENTAL FastSAS mode
+        // DEPRECATED: Cross-PDB correlation failed (r=-0.69). Use ONLY for intra-PDB coarse ranking.
         result = compute_sc_fast(pdb_path, chain1, chain2, pdb_id);
     } else {
         result = compute_sc_accurate(pdb_path, chain1, chain2, pdb_id);
