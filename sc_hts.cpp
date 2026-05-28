@@ -1,18 +1,13 @@
 // sc_hts.cpp — High-throughput Shape Complementarity (Sc) Engine
-// Two-tier architecture: AccurateConnolly (production) + FastSAS (experimental)
+// AccurateConnolly production engine (SCASA bridge, CCP4-grade, +/-2% accuracy)
 // C++17, nanoflann KD-Tree, OpenMP parallelized
 // Compile: g++ -std=c++17 -O3 -fopenmp sc_hts.cpp -o sc_hts
 //
-// DEFAULT MODE: AccurateConnolly (SCASA bridge, CCP4-grade, +/-2% accuracy)
-//   Accurate mode calls Python SCASA bridge via popen; requires sc_bridge.py in PATH.
-//
-// DEPRECATED: FastSAS (mode 0) failed cross-PDB validation (r=-0.69).
-//   Use ONLY for intra-PDB coarse ranking / prefiltering; Accurate is production truth.
-//   Contributions welcome: https://github.com/lluoto/int-iScore
+// Accurate mode calls Python SCASA bridge via popen; requires sc_bridge.py in PATH.
 //
 // Usage:
-//   sc_hts <pdb_file> <chain1> <chain2> [mode=1] [pdb_id]
-//   mode: 0=FastSAS_DEPRECATED(intra-PDB prefilter only), 1=AccurateConnolly(default)
+//   sc_hts <pdb_file> <chain1> <chain2> [mode] [pdb_id]
+//   mode: 0=AccurateConnolly(default), 1=AccurateConnolly, 2=Batch CSV
 //
 // Output (CSV line to stdout): PDB_ID, Chains, Mode, TotalDots, BuriedDots, TrimmedDots, Median_D, Sc_Score
 
@@ -44,26 +39,9 @@ static constexpr double PROBE_RADIUS       = 1.4;   // Å — water molecule pro
 static constexpr double DOT_DENSITY        = 15.0;  // dots per Å²
 static constexpr double TRIM_DISTANCE      = 1.5;   // Å — CCP4 trim band
 static constexpr double WEIGHT_ACCURATE    = 0.5;   // Å⁻² — CCP4 standard
-static constexpr double WEIGHT_FAST        = 0.05;  // Å⁻² — adjusted for SAS inflated surface
 static constexpr double INTERFACE_DISTANCE = 8.0;   // Å — interface atom cutoff
-static constexpr double FAST_DISTANCE_CUTOFF = 4.0; // Å — hard truncation for FastSAS
 static constexpr double PI_VAL            = 3.14159265358979323846;
 static constexpr double PHI_GOLDEN        = 1.6180339887498948482;
-// ============================================================================
-// FastSAS v4: DEPRECATED intra-PDB coarse prefilter (compile-time switch)
-// ============================================================================
-// DEPRECATED: Cross-PDB correlation failed (r=-0.69). Use ONLY for intra-PDB coarse ranking.
-// 6 features: 3 micro (norm alignment, distance CV, median NN dist)
-//           + 3 macro (gap index, buried density, interface asymmetry)
-// Hardcoded 3-tree GBDT inference (trained externally in Python/sklearn).
-// Placeholder thresholds — replace with trained values after cross-validation.
-enum class FastMethod : int {
-    SAS_FEATURE_REG = 0   // GBDT feature regression (v4)
-};
-static constexpr FastMethod FAST_METHOD = FastMethod::SAS_FEATURE_REG;
-
-
-// ============================================================================
 // Atom struct
 // ============================================================================
 struct Atom {
@@ -335,115 +313,6 @@ static void get_interface_atoms(
     }
 }
 
-// ============================================================================
-// MODE 1: FastSAS — rapid coarse filter
-// ============================================================================
-static void fast_sas_surface(const std::vector<Atom>& iface,
-                              AtomKDTree* self_tree,
-                              const std::vector<Atom>& own_atoms, // for self-occlusion
-                              PointCloud& out_sas)
-{
-    out_sas.clear();
-
-    // For occlusion: KD-tree of own atom centers
-    AtomCenterCloud own_cloud(own_atoms);
-    AtomKDTree own_tree(3, own_cloud, nanoflann::KDTreeSingleIndexAdaptorParams(10));
-    own_tree.buildIndex();
-
-    // Precompute Fibonacci sphere points
-    static thread_local std::vector<double> f_xs, f_ys, f_zs;
-    static thread_local int f_n = 0;
-    int max_n = (int)(4.0 * PI_VAL * (2.0 + PROBE_RADIUS) * (2.0 + PROBE_RADIUS) * DOT_DENSITY);
-    if (f_n < max_n) {
-        fibonacci_sphere(max_n, f_xs, f_ys, f_zs);
-        f_n = max_n;
-    }
-
-    for (const auto& a : iface) {
-        double R = a.radius + PROBE_RADIUS;
-        int n_pts = std::max(6, (int)(4.0 * PI_VAL * R * R * DOT_DENSITY));
-        if (n_pts > f_n) n_pts = f_n;
-
-        // Use strided sampling if we have more Fibonacci points than needed
-        int stride = f_n / n_pts;
-
-        for (int i = 0; i < n_pts; ++i) {
-            int idx = i * stride;
-            if (idx >= f_n) idx = f_n - 1;
-
-            double sx = a.x + f_xs[idx] * R;
-            double sy = a.y + f_ys[idx] * R;
-            double sz = a.z + f_zs[idx] * R;
-
-            // Normal = outward from atom center
-            double nx = f_xs[idx];
-            double ny = f_ys[idx];
-            double nz = f_zs[idx];
-
-            // Occlusion culling: check if probe_center collides with own atoms
-            double pcx = sx + nx * PROBE_RADIUS;
-            double pcy = sy + ny * PROBE_RADIUS;
-            double pcz = sz + nz * PROBE_RADIUS;
-
-            double q[3] = {pcx, pcy, pcz};
-    std::vector<unsigned int> ret_index(3);
-    std::vector<double> ret_dist(3);
-    unsigned int found = own_tree.knnSearch(q, 3, ret_index.data(), ret_dist.data());
-
-    bool occluded = false;
-    for (unsigned int k = 0; k < found; ++k) {
-                int ai = ret_index[k];
-                if (ret_dist[k] < own_atoms[ai].radius * own_atoms[ai].radius) {
-                    occluded = true;
-                    break;
-                }
-            }
-            if (occluded) continue;
-
-            out_sas.push(sx, sy, sz, nx, ny, nz);
-        }
-    }
-}
-
-// ============================================================================
-// Classify buried SAS points
-// ============================================================================
-static void classify_buried_fast(const PointCloud& sas, AtomKDTree* other_tree,
-                                  const std::vector<Atom>& other_atoms,
-                                  const std::vector<Atom>& self_atoms,
-                                  PointCloud& buried)
-{
-    buried.clear();
-    double q[3];
-    std::vector<unsigned int> ret_idx(3);
-    std::vector<double> ret_dist(3);
-
-    for (int i = 0; i < sas.size(); ++i) {
-        double pcx = sas.xs[i] + sas.nxs[i] * PROBE_RADIUS;
-        double pcy = sas.ys[i] + sas.nys[i] * PROBE_RADIUS;
-        double pcz = sas.zs[i] + sas.nzs[i] * PROBE_RADIUS;
-
-        q[0] = pcx; q[1] = pcy; q[2] = pcz;
-    unsigned int found = other_tree->knnSearch(q, 3, ret_idx.data(), ret_dist.data());
-
-    bool is_buried = false;
-    for (unsigned int k = 0; k < found; ++k) {
-            int ai = ret_idx[k];
-            if (ret_dist[k] < other_atoms[ai].radius * other_atoms[ai].radius) {
-                is_buried = true;
-                break;
-            }
-        }
-        if (is_buried) {
-            buried.push(sas.xs[i], sas.ys[i], sas.zs[i],
-                         sas.nxs[i], sas.nys[i], sas.nzs[i]);
-        }
-    }
-}
-
-// ============================================================================
-
-// ============================================================================
 // ============================================================================
 // MODE 2: Connolly Molecular Surface (simplified mds port)
 // ============================================================================
@@ -764,69 +633,6 @@ struct SCResult {
     double sc_score;
 };
 
-// Forward declaration: score_sas_features (defined below after GBDT structs)
-static double score_sas_features(const PointCloud& buried1,
-                                  const PointCloud& buried2,
-                                  int n_total1, int n_total2);
-
-static SCResult compute_sc_fast(const std::string& pdb_path,
-                                 const std::string& chain1,
-                                 const std::string& chain2,
-                                 const std::string& pdb_id)
-{
-    SCResult result;
-    result.pdb_id = pdb_id;
-    result.chains = chain1 + "_" + chain2;
-    result.mode_name = "FastSAS_DEPRECATED";
-
-    auto all = parse_pdb(pdb_path);
-    if (all.empty()) { result.sc_score = -1; return result; }
-
-    Molecule mol1, mol2;
-    if (!filter_by_chain(all, chain1, mol1) || !filter_by_chain(all, chain2, mol2)) {
-        result.sc_score = -1;
-        return result;
-    }
-
-    center_atoms(mol1.atoms, mol2.atoms);
-
-    // Interface atoms
-    std::vector<Atom> iface1, iface2;
-    get_interface_atoms(mol1.atoms, mol2.atoms, iface1, iface2, INTERFACE_DISTANCE);
-    if (iface1.empty() || iface2.empty()) { result.sc_score = 0.0; return result; }
-
-    // Build KD-trees for buried classification
-    AtomKDTree* tree2 = build_atom_tree(mol2.atoms);
-    AtomKDTree* tree1 = build_atom_tree(mol1.atoms);
-
-    // SAS surface generation
-    PointCloud sas1, sas2;
-    fast_sas_surface(iface1, tree1, mol1.atoms, sas1);
-    fast_sas_surface(iface2, tree2, mol2.atoms, sas2);
-
-    result.total_dots = sas1.size() + sas2.size();
-
-    // Buried classification
-    PointCloud buried1, buried2;
-    classify_buried_fast(sas1, tree2, mol2.atoms, mol1.atoms, buried1);
-    classify_buried_fast(sas2, tree1, mol1.atoms, mol2.atoms, buried2);
-
-    result.buried_dots = buried1.size() + buried2.size();
-    result.trimmed_dots = 0;
-    result.median_d = 0.0;
-
-    // Scoring - dispatch by FastMethod at compile time
-    // FastSAS v4: GBDT feature regression (bidirectional averaging)
-    double s_ab = score_sas_features(buried1, buried2,
-                                      (int)sas1.size(), (int)sas2.size());
-    double s_ba = score_sas_features(buried2, buried1,
-                                      (int)sas2.size(), (int)sas1.size());
-    result.sc_score = (s_ab + s_ba) / 2.0;
-
-    delete tree1; delete tree2;
-    return result;
-}
-
 static SCResult compute_sc_accurate(const std::string& pdb_path,
                                       const std::string& chain1,
                                       const std::string& chain2,
@@ -880,7 +686,7 @@ static SCResult compute_sc_accurate(const std::string& pdb_path,
 int main(int argc, char* argv[]) {
     if (argc < 4) {
         std::cerr << "Usage: sc_hts <pdb_file> <chain1> <chain2> [mode=1] [pdb_id]\n";
-        std::cerr << "  mode: 0=FastSAS_DEPRECATED(intra-PDB prefilter only), 1=AccurateConnolly(default), 2=Batch CSV\n";
+        std::cerr << "  mode: 0=AccurateConnolly(default), 1=AccurateConnolly, 2=Batch CSV\n";
         std::cerr << "  Batch: sc_hts <jobs.csv> ? ? 2\n";
         std::cerr << "  CSV format: pdb_path,chain1,chain2,mode[,pdb_id]\n";
         std::cerr << "Output (CSV): PDB_ID,Chains,Mode,TotalDots,BuriedDots,TrimmedDots,Median_D,Sc_Score\n";
@@ -950,28 +756,7 @@ int main(int argc, char* argv[]) {
         std::cout << "PDB_ID,Chains,Mode,TotalDots,BuriedDots,TrimmedDots,Median_D,Sc_Score" << std::endl;
 
         for (size_t i = 0; i < jobs.size(); ++i) {
-            const auto& j = jobs[i];
-            if (j.line_mode == 0) {
-                auto t0 = std::chrono::steady_clock::now();
-                SCResult result = compute_sc_fast(j.fpath, j.c1, j.c2, j.pid);
-                auto t1 = std::chrono::steady_clock::now();
-                double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
-                if (result.sc_score < 0) {
-                    std::cerr << "[ERROR] " << j.pid << " FastSAS failed\n";
-                    continue;
-                }
-                std::ostringstream os;
-                os << result.pdb_id << ", " << result.chains << ", "
-                   << result.mode_name << ", " << result.total_dots << ", "
-                   << result.buried_dots << ", " << result.trimmed_dots << ", "
-                   << result.median_d << ", " << result.sc_score;
-                output_lines[i] = os.str();
-                std::cerr << "[WARN] FastSAS_DEPRECATED: Cross-PDB correlation failed (r=-0.69). "
-                          << "Use ONLY for intra-PDB coarse ranking.\n";
-                std::cerr << "[INFO] " << result.mode_name << " " << ms << "ms Sc=" << result.sc_score << std::endl;
-            } else {
-                accurate_indices.push_back(i);
-            }
+            accurate_indices.push_back(i);
         }
 
         if (!accurate_indices.empty()) {
@@ -1038,12 +823,7 @@ int main(int argc, char* argv[]) {
 
     auto t0 = std::chrono::steady_clock::now();
 
-    if (mode == 0) {
-        // DEPRECATED: Cross-PDB correlation failed (r=-0.69). Use ONLY for intra-PDB coarse ranking.
-        result = compute_sc_fast(pdb_path, chain1, chain2, pdb_id);
-    } else {
-        result = compute_sc_accurate(pdb_path, chain1, chain2, pdb_id);
-    }
+    result = compute_sc_accurate(pdb_path, chain1, chain2, pdb_id);
 
     auto t1 = std::chrono::steady_clock::now();
     double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
@@ -1063,188 +843,4 @@ int main(int argc, char* argv[]) {
 
     return 0;
 }
-
-// METHOD: FastSAS v4 — GBDT Dual-Track Model (Micro + Macro Features)
-// ============================================================================
-// Uses 6 features extracted from SAS buried surface dots + interface geometry.
-// Scoring: hardcoded 3-tree GBDT (depth=3, lr=0.1) trained externally in Python.
-// Placeholder thresholds — calibrate on 12-PDB dataset before production use.
-// ============================================================================
-static double score_sas_features(const PointCloud& buried1,
-                                  const PointCloud& buried2,
-                                  int n_total1, int n_total2)
-{
-    if (buried1.size() < 5 || buried2.size() < 5) return 0.0;
-
-    // Build KD-tree for buried2
-    SOAAdaptor<double> adaptor2(buried2);
-    KDTree3D tree2(3, adaptor2, nanoflann::KDTreeSingleIndexAdaptorParams(10));
-    tree2.buildIndex();
-
-    // ---------- Pass 1: NN distances, normal alignment ----------
-    std::vector<double> distances;
-    distances.reserve(buried1.size());
-    int aligned_count = 0, total_pairs = 0;
-    double q[3]; unsigned int n_result;
-
-    #pragma omp parallel
-    {
-        std::vector<double> local_dists;
-        local_dists.reserve((int)buried1.size() / omp_get_num_threads() + 1);
-        int local_aligned = 0, local_pairs = 0;
-        #pragma omp for
-        for (int i = 0; i < (int)buried1.size(); ++i) {
-            q[0] = buried1.xs[i]; q[1] = buried1.ys[i]; q[2] = buried1.zs[i];
-            double out_dist_sq;
-            tree2.knnSearch(q, 1, &n_result, &out_dist_sq);
-            int nn_idx = (int)n_result;
-            double d = std::sqrt(out_dist_sq);
-            local_dists.push_back(d);
-            ++local_pairs;
-            double n_dot = dot(buried1.nxs[i], buried1.nys[i], buried1.nzs[i],
-                                buried2.nxs[nn_idx], buried2.nys[nn_idx], buried2.nzs[nn_idx]);
-            if (n_dot < -0.5) ++local_aligned;
-        }
-        #pragma omp critical
-        {
-            distances.insert(distances.end(), local_dists.begin(), local_dists.end());
-            aligned_count += local_aligned;
-            total_pairs += local_pairs;
-        }
-    }
-
-    if (total_pairs == 0) return 0.0;
-
-    // ---------- Feature extraction ----------
-    // F1: Normal alignment rate (micro)
-    double f1 = (double)aligned_count / (double)total_pairs;
-
-    // F2: Distance CV (micro)
-    double d_mean = 0.0;
-    for (double d : distances) d_mean += d;
-    d_mean /= total_pairs;
-    double d_var = 0.0;
-    for (double d : distances) d_var += (d - d_mean) * (d - d_mean);
-    d_var /= total_pairs;
-    double f2 = (d_mean > 0.0) ? (std::sqrt(d_var) / d_mean) : 0.0;
-
-    // F3: Median NN distance (micro)
-    size_t mid = distances.size() / 2;
-    std::nth_element(distances.begin(), distances.begin() + mid, distances.end());
-    double f3 = distances[mid];
-
-    // ---- Macro features: 3D Bounding Box from buried SAS dots ----
-    double min_x =  1e30, min_y =  1e30, min_z =  1e30;
-    double max_x = -1e30, max_y = -1e30, max_z = -1e30;
-    size_t n_total_buried = buried1.size() + buried2.size();
-
-    for (int i = 0; i < (int)buried1.size(); ++i) {
-        if (buried1.xs[i] < min_x) min_x = buried1.xs[i];
-        if (buried1.ys[i] < min_y) min_y = buried1.ys[i];
-        if (buried1.zs[i] < min_z) min_z = buried1.zs[i];
-        if (buried1.xs[i] > max_x) max_x = buried1.xs[i];
-        if (buried1.ys[i] > max_y) max_y = buried1.ys[i];
-        if (buried1.zs[i] > max_z) max_z = buried1.zs[i];
-    }
-    for (int i = 0; i < (int)buried2.size(); ++i) {
-        if (buried2.xs[i] < min_x) min_x = buried2.xs[i];
-        if (buried2.ys[i] < min_y) min_y = buried2.ys[i];
-        if (buried2.zs[i] < min_z) min_z = buried2.zs[i];
-        if (buried2.xs[i] > max_x) max_x = buried2.xs[i];
-        if (buried2.ys[i] > max_y) max_y = buried2.ys[i];
-        if (buried2.zs[i] > max_z) max_z = buried2.zs[i];
-    }
-
-    double box_vol = (max_x - min_x) * (max_y - min_y) * (max_z - min_z);
-    if (box_vol < 1e-12) box_vol = 1e-12;
-
-    // F4: Gap index = Box_Volume / N_buried (smaller = tighter packing)
-    double f4 = box_vol / (double)n_total_buried;
-
-    // F5: Buried density = N_buried / Box_Volume (larger = tighter packing)
-    double f5 = (double)n_total_buried / box_vol;
-
-    // F6: Interface asymmetry = |N1 - N2| / (N1 + N2)
-    double f6 = std::abs((double)(buried1.size() - buried2.size()))
-              / (double)(buried1.size() + buried2.size());
-
-    // ---------- GBDT Inference (3 trees, depth 3, lr=0.1) ----------
-    // PLACEHOLDER: thresholds trained externally (Python sklearn).
-    // Replace these arrays with trained values after cross-validation.
-    // Tree structure: 7 internal nodes (indexed 0-6), 8 leaves (indexed 0-7).
-    // For node i: left child = 2*i+1, right child = 2*i+2.
-
-    struct GBTree {
-        int    feature[7];
-        double threshold[7];
-        double leaf[8];
-    };
-
-    // Tree 0 — PLACEHOLDER
-    GBTree t0;
-    t0.feature[0] = 3;  t0.threshold[0] = 2.0;
-    t0.feature[1] = 0;  t0.threshold[1] = 0.4;
-    t0.feature[2] = 5;  t0.threshold[2] = 0.3;
-    t0.feature[3] = 1;  t0.threshold[3] = 0.5;
-    t0.feature[4] = 4;  t0.threshold[4] = 1.0;
-    t0.feature[5] = 2;  t0.threshold[5] = 3.0;
-    t0.feature[6] = 3;  t0.threshold[6] = 1.5;
-    t0.leaf[0] = 0.50; t0.leaf[1] = 0.55; t0.leaf[2] = 0.52; t0.leaf[3] = 0.58;
-    t0.leaf[4] = 0.60; t0.leaf[5] = 0.62; t0.leaf[6] = 0.56; t0.leaf[7] = 0.65;
-
-    // Tree 1 — PLACEHOLDER
-    GBTree t1;
-    t1.feature[0] = 5;  t1.threshold[0] = 0.2;
-    t1.feature[1] = 2;  t1.threshold[1] = 2.5;
-    t1.feature[2] = 0;  t1.threshold[2] = 0.5;
-    t1.feature[3] = 4;  t1.threshold[3] = 1.5;
-    t1.feature[4] = 3;  t1.threshold[4] = 3.0;
-    t1.feature[5] = 1;  t1.threshold[5] = 0.4;
-    t1.feature[6] = 2;  t1.threshold[6] = 2.0;
-    t1.leaf[0] = 0.48; t1.leaf[1] = 0.53; t1.leaf[2] = 0.57; t1.leaf[3] = 0.60;
-    t1.leaf[4] = 0.55; t1.leaf[5] = 0.59; t1.leaf[6] = 0.63; t1.leaf[7] = 0.67;
-
-    // Tree 2 — PLACEHOLDER
-    GBTree t2;
-    t2.feature[0] = 4;  t2.threshold[0] = 0.8;
-    t2.feature[1] = 0;  t2.threshold[1] = 0.3;
-    t2.feature[2] = 1;  t2.threshold[2] = 0.6;
-    t2.feature[3] = 3;  t2.threshold[3] = 2.5;
-    t2.feature[4] = 5;  t2.threshold[4] = 0.25;
-    t2.feature[5] = 2;  t2.threshold[5] = 3.5;
-    t2.feature[6] = 4;  t2.threshold[6] = 1.2;
-    t2.leaf[0] = 0.45; t2.leaf[1] = 0.51; t2.leaf[2] = 0.54; t2.leaf[3] = 0.58;
-    t2.leaf[4] = 0.61; t2.leaf[5] = 0.56; t2.leaf[6] = 0.64; t2.leaf[7] = 0.68;
-
-    constexpr double LR = 0.1;
-    constexpr double BIAS = 0.52;
-
-    // Inference: walk each tree, accumulate leaf values
-    auto walk_tree = [](const GBTree& t, const double* feat) {
-        int node = 0;
-        for (int d = 0; d < 3; ++d) {
-            int left   = 2 * node + 1;
-            int right  = 2 * node + 2;
-            int feat_i = t.feature[node];
-            if (feat[feat_i] < t.threshold[node])
-                node = left;
-            else
-                node = right;
-        }
-        int leaf_idx = node - 7;
-        return t.leaf[leaf_idx];
-    };
-
-    double features[6] = { f1, f2, f3, f4, f5, f6 };
-    double pred = BIAS;
-    pred += LR * walk_tree(t0, features);
-    pred += LR * walk_tree(t1, features);
-    pred += LR * walk_tree(t2, features);
-
-    if (pred < 0.0) pred = 0.0;
-    if (pred > 1.0) pred = 1.0;
-
-    return pred;
-}
-
 
